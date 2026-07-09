@@ -4,11 +4,13 @@ import { prisma } from "@/lib/prisma";
 // Spend ledger (§7). A trip is date + store + typed total + a receipt photo
 // stored in the DB. No OCR, no line items. Loosely coupled to the shopping list.
 
-// GET /api/trips — recent trips (most recent first).
+// GET /api/trips — recent trips (most recent first), with whether each has a
+// receipt photo attached (the bytes are served separately).
 export async function GET() {
   const trips = await prisma.shoppingTrip.findMany({
     orderBy: { date: "desc" },
     take: 100,
+    include: { receipt: { select: { id: true } } },
   });
   return NextResponse.json(trips);
 }
