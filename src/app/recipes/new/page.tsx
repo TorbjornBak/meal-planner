@@ -10,6 +10,8 @@ interface ParsedIngredient {
 }
 interface ParsedRecipe {
   name: string;
+  source: string | null;
+  instructions: string | null;
   statedServings: number;
   ingredients: ParsedIngredient[];
 }
@@ -111,6 +113,16 @@ export default function NewRecipePage() {
               style={{ width: 64 }}
             />
           </label>
+          <br />
+          <label>
+            Source link (optional){" "}
+            <input
+              value={draft.source ?? ""}
+              onChange={(e) => setDraft({ ...draft, source: e.target.value || null })}
+              placeholder="https://…"
+              style={{ width: 320 }}
+            />
+          </label>
 
           <table style={{ width: "100%", marginTop: 12 }}>
             <thead>
@@ -153,6 +165,19 @@ export default function NewRecipePage() {
               ))}
             </tbody>
           </table>
+
+          <label style={{ display: "block", marginTop: 12 }}>
+            Instructions
+            <textarea
+              value={draft.instructions ?? ""}
+              onChange={(e) =>
+                setDraft({ ...draft, instructions: e.target.value || null })
+              }
+              rows={10}
+              style={{ width: "100%", marginTop: 4 }}
+              placeholder="Method / steps…"
+            />
+          </label>
 
           <button onClick={save} disabled={busy}>
             {busy ? "Saving…" : "Save to library"}

@@ -21,6 +21,8 @@ model Recipe {
   name           String
   /// Where it came from (URL or free text). Optional — pasted plans may lack one.
   source         String?
+  /// The method/steps text, captured at parse time for the cooking view (§2).
+  instructions   String?
   /// Servings the recipe is written for; scaling divides by this. (§4)
   statedServings Int
   isFavorite     Boolean         @default(false)

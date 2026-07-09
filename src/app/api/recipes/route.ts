@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 const RecipeInput = z.object({
   name: z.string().min(1),
   source: z.string().optional().nullable(),
+  instructions: z.string().optional().nullable(),
   statedServings: z.number().int().positive(),
   tags: z.array(z.string()).optional(),
   ingredients: z.array(
@@ -33,12 +34,14 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { name, source, statedServings, tags, ingredients } = parsed.data;
+  const { name, source, instructions, statedServings, tags, ingredients } =
+    parsed.data;
 
   const recipe = await prisma.recipe.create({
     data: {
       name,
       source: source ?? null,
+      instructions: instructions ?? null,
       statedServings,
       tags: tags ?? [],
       ingredients: {

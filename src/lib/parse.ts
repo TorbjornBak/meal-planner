@@ -25,6 +25,8 @@ export interface ParsedRecipe {
   source: string | null;
   statedServings: number;
   ingredients: ParsedIngredient[];
+  /** The method/steps block, for the cooking view. Null if not found. */
+  instructions: string | null;
 }
 
 /** Danish measuring units we recognize as an ingredient's unit. */
@@ -51,6 +53,9 @@ const VAGUE_PREFIX =
 
 const INGREDIENTS_START = /hvad skal du bruge|ingredienser/i;
 const METHOD_START = /^(hvordan|fremgangs|s[åa]dan|tilberedning)/i;
+// Sections that follow the method (tips / allergy notes / sign-off) — where the
+// instructions block ends.
+const NOTES_START = /^(opm[æae]rksomhed|tips|noter|god forn[øo]jelse)/i;
 const SERVINGS = /nok til\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*pers/i;
 const BARE_DOMAIN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 
@@ -63,7 +68,21 @@ export function parseRecipeText(text: string): ParsedRecipe {
     source: extractSource(lines),
     statedServings: extractServings(text),
     ingredients: extractIngredients(lines),
+    instructions: extractInstructions(lines),
   };
+}
+
+function extractInstructions(lines: string[]): string | null {
+  const start = lines.findIndex((l) => METHOD_START.test(l));
+  if (start === -1) return null;
+
+  const steps: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (NOTES_START.test(lines[i])) break; // reached tips / notes section
+    steps.push(lines[i]);
+  }
+  const text = steps.join("\n").trim();
+  return text.length > 0 ? text : null;
 }
 
 function extractTitle(lines: string[]): string {

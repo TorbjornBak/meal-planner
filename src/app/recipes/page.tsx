@@ -92,7 +92,9 @@ export default function RecipesPage() {
                 </>
               ) : (
                 <>
-                  <strong style={{ flex: 1 }}>{r.name}</strong>
+                  <Link href={`/recipes/${r.id}`} style={{ flex: 1 }}>
+                    <strong>{r.name}</strong>
+                  </Link>
                   <button
                     className="muted"
                     onClick={() => {
