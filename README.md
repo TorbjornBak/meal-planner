@@ -12,15 +12,17 @@ spend.
 
 - **Next.js** (App Router, TypeScript, React) — full-stack.
 - **Postgres + Prisma.**
-- **Anthropic API**, called server-side, for recipe parsing.
 - **Docker Compose**: app + Postgres + Caddy, reachable over **Tailscale**.
+
+No external services: recipe parsing is a deterministic string parser (§1), so
+there's nothing to call out to and no API key to manage.
 
 ## Project layout
 
 ```
 prisma/schema.prisma      Data model (recipes, plans, lists, pantry, spend)
 src/lib/                  Core logic:
-  anthropic.ts              server-side recipe parsing (§1)
+  parse.ts                  deterministic recipe parsing, no LLM (§1)
   scaling.ts                recipe scaling to household size (§4)
   shopping.ts               merge + pantry aggregation (§5)
   keys.ts                   ingredient-name normalization for merge/diff/pantry
@@ -36,8 +38,8 @@ scripts/backup.sh        Nightly Borg backup to a Hetzner Storage Box (§11)
 
 ## Local development
 
-1. Copy env: `cp .env.example .env` and fill in `ANTHROPIC_API_KEY`,
-   `HOUSEHOLD_PASSWORD`, and `AUTH_SECRET`.
+1. Copy env: `cp .env.example .env` and fill in `HOUSEHOLD_PASSWORD` and
+   `AUTH_SECRET`.
 2. Start Postgres (either `docker compose up db` or your own instance) and point
    `DATABASE_URL` at it.
 3. Install deps: `npm install`.

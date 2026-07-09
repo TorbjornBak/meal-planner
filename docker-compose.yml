@@ -28,7 +28,6 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-mealplanner}:${POSTGRES_PASSWORD:-mealplanner}@db:5432/${POSTGRES_DB:-mealplanner}?schema=public"
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       HOUSEHOLD_PASSWORD: ${HOUSEHOLD_PASSWORD}
       AUTH_SECRET: ${AUTH_SECRET}
     expose:

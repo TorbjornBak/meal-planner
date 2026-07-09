@@ -11,8 +11,10 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 ## 1. Getting recipes in — paste-and-parse
 
 - You copy recipe/plan text (from anotherdayofeating or anywhere) and paste it in.
-- The Anthropic API parses the text into structured ingredients (name / quantity /
-  unit) plus the recipe's stated serving count.
+- A **deterministic parser** (plain string handling, no LLM) reads the text into
+  structured ingredients (name / quantity / unit) plus the recipe's stated
+  serving count. The source pages have a rigid structure — a servings line and an
+  ingredient block with one item per line — so no model is needed.
 - **No web scraping** — you fetch the content as a normal reader and paste it.
 - **A review-and-edit step is mandatory.** You eyeball and correct the parsed
   ingredients before they count toward anything. Bad parse = wrong list.
@@ -93,7 +95,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - **Next.js (TypeScript, React)** full-stack.
 - **Postgres + Prisma.**
 - **Docker Compose:** app + Postgres + Caddy/Tailscale.
-- Anthropic API called **server-side** for parsing.
+- Recipe parsing is a **deterministic, in-process string parser** — no external
+  services, no LLM, no API keys.
 
 ---
 
