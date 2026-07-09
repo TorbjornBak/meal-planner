@@ -1,0 +1,174 @@
+// MealPlanner v1 data model — see DESIGN.md §"Data model sketch".
+//
+// One household, one shared plan/library/ledger. No per-user tables (§9).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------------------
+// Recipe library (§1, §2)
+// -----------------------------------------------------------------------------
+
+/// Everything pasted-and-parsed is saved here and accumulates into the library.
+model Recipe {
+  id             String          @id @default(cuid())
+  name           String
+  /// Where it came from (URL or free text). Optional — pasted plans may lack one.
+  source         String?
+  /// Servings the recipe is written for; scaling divides by this. (§4)
+  statedServings Int
+  isFavorite     Boolean         @default(false)
+  tags           String[]        @default([])
+  ingredients    IngredientLine[]
+  dinnerSlots    DinnerSlot[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([isFavorite])
+}
+
+/// One "name / quantity / unit" line belonging to a recipe. Corrected by the
+/// mandatory review-and-edit step before it counts toward anything (§1).
+model IngredientLine {
+  id       String  @id @default(cuid())
+  recipeId String
+  recipe   Recipe  @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  name     String
+  /// Null for "to taste" / uncountable lines. Weight/volume scale precisely;
+  /// countable items round up to whole units at list-generation time (§4).
+  quantity Float?
+  /// e.g. "g", "ml", "clove", or null for bare counts ("2 onions").
+  unit     String?
+  /// Preserves the order lines were parsed/entered in.
+  position Int     @default(0)
+
+  @@index([recipeId])
+}
+
+// -----------------------------------------------------------------------------
+// Weekly dinner plan (§3, §4)
+// -----------------------------------------------------------------------------
+
+/// A single week of dinners. Nights may be empty (leftovers / eating out).
+model WeekPlan {
+  id           String        @id @default(cuid())
+  /// The Monday of the week (date-only), unique per household.
+  weekStart    DateTime      @unique @db.Date
+  slots        DinnerSlot[]
+  shoppingList ShoppingList?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// One of up to 7 dinner slots in a week. A null recipe = empty night.
+model DinnerSlot {
+  id         String   @id @default(cuid())
+  weekPlanId String
+  weekPlan   WeekPlan @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
+  /// 0 = Monday … 6 = Sunday.
+  dayOfWeek  Int
+  recipeId   String?
+  recipe     Recipe?  @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+  /// Per-dinner override of household size for guests / batch-cooking (§4).
+  servingsOverride Int?
+
+  @@unique([weekPlanId, dayOfWeek])
+  @@index([recipeId])
+}
+
+// -----------------------------------------------------------------------------
+// Shopping list (§5, §6)
+// -----------------------------------------------------------------------------
+
+/// A persistent list derived from a WeekPlan, keyed by ingredient identity so
+/// it can be re-diffed against plan changes without losing checked state (§5).
+model ShoppingList {
+  id          String             @id @default(cuid())
+  weekPlanId  String             @unique
+  weekPlan    WeekPlan           @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
+  items       ShoppingListItem[]
+  generatedAt DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+/// One actionable line on the list. Surviving items keep `checked` across
+/// re-generation; new ingredients arrive unchecked, removed ones drop off.
+model ShoppingListItem {
+  id             String       @id @default(cuid())
+  shoppingListId String
+  shoppingList   ShoppingList @relation(fields: [shoppingListId], references: [id], onDelete: Cascade)
+  /// Normalized ingredient-name key used for merge + diff identity (§5).
+  ingredientKey  String
+  /// Human-readable name shown in the UI.
+  displayName    String
+  /// Aggregated primary amount (may be null for "to taste").
+  quantity       Float?
+  unit           String?
+  /// When units don't reconcile cleanly we show both rather than guess (§5),
+  /// e.g. "2 onions" + "150 g onion". Null when a single clean amount exists.
+  altQuantity    Float?
+  altUnit        String?
+  /// Ticked-off state, shared across household phones (§6).
+  checked        Boolean      @default(false)
+  /// Pulled into the "Pantry — check you have these" section (§5).
+  isPantry       Boolean      @default(false)
+
+  @@unique([shoppingListId, ingredientKey])
+  @@index([shoppingListId])
+}
+
+/// The household's "things we always have" list. Matched by name against the
+/// shopping list to move items into the pantry section (§5).
+model PantryItem {
+  id      String @id @default(cuid())
+  name    String
+  /// Normalized key matched against ShoppingListItem.ingredientKey.
+  nameKey String @unique
+  createdAt DateTime @default(now())
+}
+
+// -----------------------------------------------------------------------------
+// Spending (§7, §8)
+// -----------------------------------------------------------------------------
+
+/// One grocery trip. Loosely coupled to the shopping list — no item-level
+/// cost attribution (§7).
+model ShoppingTrip {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  store     String
+  /// The typed-in receipt total.
+  total     Decimal  @db.Money
+  receipt   Receipt?
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+/// The receipt photo for a trip, stored in the database (§7). No OCR.
+model Receipt {
+  id       String       @id @default(cuid())
+  tripId   String       @unique
+  trip     ShoppingTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  photo    Bytes
+  mimeType String
+  uploadedAt DateTime   @default(now())
+}
+
+// -----------------------------------------------------------------------------
+// Settings (§4, §9) — single household-wide row.
+// -----------------------------------------------------------------------------
+
+model Settings {
+  /// Singleton row; always id = 1.
+  id            Int @id @default(1)
+  /// Default servings every recipe scales to (§4).
+  householdSize Int @default(2)
+  updatedAt     DateTime @updatedAt
+}

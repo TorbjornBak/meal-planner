@@ -1,0 +1,16 @@
+# HTTPS for the app over the Tailscale MagicDNS name (§10).
+#
+# Replace <host>.<tailnet>.ts.net with your machine's MagicDNS name.
+# Provision the cert on the host with:
+#   tailscale cert <host>.<tailnet>.ts.net
+# and mount the resulting .crt/.key into the caddy container's /data.
+#
+# Alternatively, drop Caddy entirely and use `tailscale serve https / http://localhost:3000`.
+
+<host>.<tailnet>.ts.net {
+	reverse_proxy app:3000
+
+	tls /data/<host>.<tailnet>.ts.net.crt /data/<host>.<tailnet>.ts.net.key
+
+	encode gzip
+}

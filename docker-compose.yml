@@ -1,0 +1,54 @@
+# MealPlanner — app + Postgres + Caddy (§10, §12).
+#
+# Caddy terminates HTTPS using certs from `tailscale cert` on the MagicDNS
+# *.ts.net name. Tailscale itself runs on the host (or as a sidecar); the app is
+# only reachable over the tailnet — no public exposure, no port-forwarding (§10).
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mealplanner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mealplanner}
+      POSTGRES_DB: ${POSTGRES_DB:-mealplanner}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mealplanner}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-mealplanner}:${POSTGRES_PASSWORD:-mealplanner}@db:5432/${POSTGRES_DB:-mealplanner}?schema=public"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      HOUSEHOLD_PASSWORD: ${HOUSEHOLD_PASSWORD}
+      AUTH_SECRET: ${AUTH_SECRET}
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      # Bound to the Tailscale interface in production; see Caddyfile.
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Mount the tailscale cert/key directory here (see Caddyfile TODO).
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
