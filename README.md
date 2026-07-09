@@ -12,7 +12,7 @@ spend.
 
 - **Next.js** (App Router, TypeScript, React) — full-stack.
 - **Postgres + Prisma.**
-- **Docker Compose**: app + Postgres + Caddy, reachable over **Tailscale**.
+- **Docker Compose**: app + Postgres, served over **Tailscale** via `tailscale serve`.
 
 No external services: recipe parsing is a deterministic string parser (§1), so
 there's nothing to call out to and no API key to manage.
@@ -49,10 +49,10 @@ scripts/backup.sh        Nightly Borg backup to a Hetzner Storage Box (§11)
 
 ## Production (home box via Tailscale)
 
-- `docker compose up -d --build` brings up app + Postgres + Caddy.
-- Provision an HTTPS cert with `tailscale cert <host>.<tailnet>.ts.net` and edit
-  `Caddyfile` with your MagicDNS name (§10). Or drop Caddy and use
-  `tailscale serve`.
+- `docker compose up -d --build` brings up app + Postgres. The app listens on
+  `127.0.0.1:3000`.
+- Expose it over HTTPS on the tailnet with `tailscale serve --bg 3000`
+  (tailscaled runs on the host). No reverse proxy or cert management (§10).
 - Migrations run automatically on container start (`prisma migrate deploy`).
 - Schedule `scripts/backup.sh` nightly (§11).
 

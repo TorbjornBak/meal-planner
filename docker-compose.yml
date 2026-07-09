@@ -1,8 +1,14 @@
-# MealPlanner — app + Postgres + Caddy (§10, §12).
+# MealPlanner — app + Postgres (§10, §12).
 #
-# Caddy terminates HTTPS using certs from `tailscale cert` on the MagicDNS
-# *.ts.net name. Tailscale itself runs on the host (or as a sidecar); the app is
-# only reachable over the tailnet — no public exposure, no port-forwarding (§10).
+# HTTPS is handled by `tailscale serve` on the host, not by a reverse proxy in
+# Compose. The app publishes port 3000 to the host loopback; tailscaled (running
+# on the host, joined to the tailnet) serves it over HTTPS on the MagicDNS
+# *.ts.net name:
+#
+#   tailscale serve --bg 3000
+#
+# That exposes the app on the tailnet only — no public exposure, no
+# port-forwarding, no cert management (§10).
 
 services:
   db:
@@ -35,24 +41,10 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-mealplanner}:${POSTGRES_PASSWORD:-mealplanner}@db:5432/${POSTGRES_DB:-mealplanner}?schema=public"
       HOUSEHOLD_PASSWORD: ${HOUSEHOLD_PASSWORD}
       AUTH_SECRET: ${AUTH_SECRET}
-    expose:
-      - "3000"
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on:
-      - app
     ports:
-      # Bound to the Tailscale interface in production; see Caddyfile.
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # Mount the tailscale cert/key directory here (see Caddyfile TODO).
-      - caddy_data:/data
-      - caddy_config:/config
+      # Loopback-only; `tailscale serve` on the host proxies this to the tailnet
+      # over HTTPS. Not reachable from the LAN.
+      - "127.0.0.1:3000:3000"
 
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:

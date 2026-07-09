@@ -80,7 +80,7 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 - Runs on a home box, reachable over a private Tailscale tailnet from anywhere
   (including the store) — no port-forwarding, no dynamic DNS, no public exposure.
-- HTTPS via `tailscale serve` / `tailscale cert` on the MagicDNS `*.ts.net` name.
+- HTTPS via `tailscale serve` on the MagicDNS `*.ts.net` name — no reverse proxy, no cert management.
 - Each household member installs Tailscale once and joins the tailnet.
 - **Possible VPS migration later** — kept cheap by building Dockerized from day one.
 
@@ -94,7 +94,7 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 - **Next.js (TypeScript, React)** full-stack.
 - **Postgres + Prisma.**
-- **Docker Compose:** app + Postgres + Caddy/Tailscale.
+- **Docker Compose:** app + Postgres. HTTPS via `tailscale serve` on the host.
 - Recipe parsing is a **deterministic, in-process string parser** — no external
   services, no LLM, no API keys.
 
