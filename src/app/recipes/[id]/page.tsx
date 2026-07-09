@@ -57,8 +57,9 @@ export default async function RecipeDetailPage({
 
   return (
     <>
-      <p>
+      <p style={{ display: "flex", justifyContent: "space-between" }}>
         <Link href="/recipes">← Recipes</Link>
+        <Link href={`/recipes/${recipe.id}/edit`}>Edit</Link>
       </p>
 
       <h1>

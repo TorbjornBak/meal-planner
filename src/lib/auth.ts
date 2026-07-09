@@ -58,3 +58,17 @@ export async function isValidSession(token: string | undefined): Promise<boolean
   if (!token) return false;
   return safeEqual(token, await issueSessionToken());
 }
+
+/**
+ * A stable household token for the bookmarklet capture endpoint (§1). Distinct
+ * from the session cookie so the cross-origin capture request can authenticate
+ * without one. Derived from AUTH_SECRET, so it's stable and needs no storage.
+ */
+export function captureToken(): Promise<string> {
+  return hmacHex("capture");
+}
+
+export async function isValidCaptureToken(token: string | undefined): Promise<boolean> {
+  if (!token) return false;
+  return safeEqual(token, await captureToken());
+}

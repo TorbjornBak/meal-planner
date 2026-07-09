@@ -23,6 +23,9 @@ model Recipe {
   source         String?
   /// The method/steps text, captured at parse time for the cooking view (§2).
   instructions   String?
+  /// Raw captured page HTML (bookmarklet capture), kept so a recipe can be
+  /// re-parsed later without re-fetching. Null for hand-pasted recipes.
+  sourceHtml     String?
   /// Servings the recipe is written for; scaling divides by this. (§4)
   statedServings Int
   isFavorite     Boolean         @default(false)

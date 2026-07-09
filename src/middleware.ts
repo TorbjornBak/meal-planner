@@ -12,6 +12,9 @@ export async function middleware(req: NextRequest) {
   const isPublic =
     pathname === "/login" ||
     pathname === "/api/login" ||
+    // Capture is cross-origin from the recipe site and authenticates with the
+    // household capture token instead of the session cookie.
+    pathname === "/api/capture" ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico";
 

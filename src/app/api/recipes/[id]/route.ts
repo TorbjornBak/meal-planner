@@ -4,13 +4,43 @@ import { prisma } from "@/lib/prisma";
 
 // Rename, favorite, and delete for a single recipe (§2).
 
+// GET /api/recipes/[id] — a single recipe with its ingredients (for editing).
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const recipe = await prisma.recipe.findUnique({
+    where: { id },
+    include: { ingredients: { orderBy: { position: "asc" } } },
+  });
+  if (!recipe) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  return NextResponse.json(recipe);
+}
+
 const PatchInput = z.object({
   name: z.string().min(1).optional(),
+  source: z.string().nullable().optional(),
+  instructions: z.string().nullable().optional(),
+  statedServings: z.number().int().positive().optional(),
   isFavorite: z.boolean().optional(),
   tags: z.array(z.string()).optional(),
+  // When present, fully replaces the recipe's ingredient lines.
+  ingredients: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        quantity: z.number().nullable(),
+        unit: z.string().nullable(),
+      }),
+    )
+    .optional(),
 });
 
-// PATCH /api/recipes/[id] — rename / toggle favorite / edit tags.
+// PATCH /api/recipes/[id] — quick actions (rename / favorite) or a full edit
+// (fields + ingredient replacement).
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -20,7 +50,28 @@ export async function PATCH(
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const recipe = await prisma.recipe.update({ where: { id }, data: parsed.data });
+  const { ingredients, ...fields } = parsed.data;
+
+  const recipe = await prisma.$transaction(async (tx) => {
+    await tx.recipe.update({ where: { id }, data: fields });
+    if (ingredients) {
+      await tx.ingredientLine.deleteMany({ where: { recipeId: id } });
+      await tx.ingredientLine.createMany({
+        data: ingredients.map((ing, i) => ({
+          recipeId: id,
+          name: ing.name,
+          quantity: ing.quantity,
+          unit: ing.unit,
+          position: i,
+        })),
+      });
+    }
+    return tx.recipe.findUnique({
+      where: { id },
+      include: { ingredients: { orderBy: { position: "asc" } } },
+    });
+  });
+
   return NextResponse.json(recipe);
 }
 

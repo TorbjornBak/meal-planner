@@ -126,7 +126,16 @@ function isSectionHeader(line: string): boolean {
   return /[A-ZÆØÅ]/.test(line) && line === line.toUpperCase();
 }
 
-function parseIngredientLine(line: string): ParsedIngredient {
+/** Parse a servings value like "3-4", "4 personer", or "4" → an int (upper). */
+export function parseServingsText(value: string): number {
+  const m = value.match(SERVINGS) ?? value.match(/(\d+)(?:\s*[–-]\s*(\d+))?/);
+  if (!m) return 4;
+  const lo = Number(m[1]);
+  const hi = m[2] ? Number(m[2]) : lo;
+  return Math.max(lo, hi);
+}
+
+export function parseIngredientLine(line: string): ParsedIngredient {
   // Optional leading amount, possibly a range ("6-8"), then the rest.
   const m = line.match(
     /^(\d+(?:[.,]\d+)?)(?:\s*[–-]\s*(\d+(?:[.,]\d+)?))?\s+(.*)$/,
