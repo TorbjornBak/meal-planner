@@ -85,7 +85,7 @@ export default function ShoppingPage() {
           toBuy.map((item) => (
             <label
               key={item.id}
-              style={{ display: "flex", gap: 8, padding: "4px 0", cursor: "pointer" }}
+              style={{ display: "flex", gap: 8, padding: "12px 0", cursor: "pointer" }}
             >
               <input
                 type="checkbox"
@@ -121,7 +121,7 @@ export default function ShoppingPage() {
           {pantry.map((item) => (
             <div
               key={item.id}
-              style={{ display: "flex", gap: 8, padding: "4px 0", alignItems: "center" }}
+              style={{ display: "flex", gap: 8, padding: "12px 0", alignItems: "center" }}
             >
               <span>
                 {item.displayName}

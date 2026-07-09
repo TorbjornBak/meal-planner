@@ -133,7 +133,8 @@ export default function SpendingPage() {
         ) : trips.length === 0 ? (
           <p className="muted">No trips logged yet.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
               {trips.map((t) => (
                 <tr key={t.id} style={{ borderTop: "1px solid var(--border)" }}>
@@ -164,6 +165,7 @@ export default function SpendingPage() {
               ))}
             </tbody>
           </table>
+            </div>
         )}
       </div>
 

@@ -124,6 +124,7 @@ export default function NewRecipePage() {
             />
           </label>
 
+          <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", marginTop: 12 }}>
             <thead>
               <tr>
@@ -165,6 +166,7 @@ export default function NewRecipePage() {
               ))}
             </tbody>
           </table>
+          </div>
 
           <label style={{ display: "block", marginTop: 12 }}>
             Instructions

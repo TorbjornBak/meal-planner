@@ -130,6 +130,7 @@ export default function EditRecipePage({
 
       <div className="card">
         <h2>Ingredients</h2>
+        <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%" }}>
           <thead>
             <tr>
@@ -176,6 +177,7 @@ export default function EditRecipePage({
             ))}
           </tbody>
         </table>
+        </div>
         <button className="muted" onClick={addRow}>
           + Add ingredient
         </button>

@@ -1,10 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "MealPlanner",
   description: "Household dinners → shopping list → grocery spend.",
+  // Lets the app be added to a phone's home screen and run chrome-light.
+  appleWebApp: { capable: true, title: "MealPlanner", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#faf9f7",
 };
 
 export default function RootLayout({
