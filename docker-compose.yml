@@ -12,6 +12,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-mealplanner}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mealplanner}
       POSTGRES_DB: ${POSTGRES_DB:-mealplanner}
+    ports:
+      # Loopback-only, so `npm run dev` on the host can reach it without
+      # exposing Postgres to the tailnet. The app container talks to `db`
+      # over the compose network regardless.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
