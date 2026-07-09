@@ -17,9 +17,47 @@ import {
  * Still feeds the review-and-edit step — capture saves a recipe you then curate.
  */
 export function parseRecipeHtml(html: string): ParsedRecipe {
+  // A full page has nav/header/cart chrome before the article, so the text
+  // parser's "first line is the title" heuristic is unreliable here. Take the
+  // title from the document metadata instead.
+  const htmlTitle = extractHtmlTitle(html);
+
   const fromJsonLd = extractJsonLdRecipe(html);
-  if (fromJsonLd && fromJsonLd.ingredients.length > 0) return fromJsonLd;
-  return parseRecipeText(htmlToText(html));
+  if (fromJsonLd && fromJsonLd.ingredients.length > 0) {
+    if (!isGoodName(fromJsonLd.name) && htmlTitle) fromJsonLd.name = htmlTitle;
+    return fromJsonLd;
+  }
+
+  const parsed = parseRecipeText(htmlToText(html));
+  if (htmlTitle) parsed.name = htmlTitle;
+  return parsed;
+}
+
+function isGoodName(name: string): boolean {
+  const n = name.trim();
+  return n.length >= 2 && !/^\d+$/.test(n) && n !== "Untitled recipe";
+}
+
+/** Best title from the page: og:title, then <title>, then first <h1>. */
+export function extractHtmlTitle(html: string): string | null {
+  const og =
+    html.match(
+      /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i,
+    ) ??
+    html.match(
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i,
+    );
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+
+  for (const cand of [og?.[1], title?.[1], h1?.[1]]) {
+    if (!cand) continue;
+    let t = decodeEntities(stripTags(cand)).replace(/\s+/g, " ").trim();
+    // Drop a trailing " — Site Name" / " | Site Name" suffix.
+    t = t.split(/\s+[—–|]\s+/)[0].trim();
+    if (isGoodName(t)) return t;
+  }
+  return null;
 }
 
 // --- JSON-LD ------------------------------------------------------------------
