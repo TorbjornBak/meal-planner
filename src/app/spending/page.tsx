@@ -33,7 +33,16 @@ function startOfMonth(): Date {
 export default function SpendingPage() {
   const [trips, setTrips] = useState<Trip[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [zoomed, setZoomed] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Esc minimizes the expanded receipt.
+  useEffect(() => {
+    if (!zoomed) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoomed(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomed]);
 
   async function load() {
     setTrips(await fetch("/api/trips").then((r) => r.json()));
@@ -135,14 +144,18 @@ export default function SpendingPage() {
                   </td>
                   <td style={{ padding: "6px 8px" }}>
                     {t.receipt ? (
-                      <a href={`/api/trips/${t.id}/receipt`} target="_blank" rel="noreferrer">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={`/api/trips/${t.id}/receipt`}
-                          alt="receipt"
-                          style={{ height: 32, borderRadius: 4, verticalAlign: "middle" }}
-                        />
-                      </a>
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/trips/${t.id}/receipt`}
+                        alt="receipt — click to enlarge"
+                        onClick={() => setZoomed(t.id)}
+                        style={{
+                          height: 32,
+                          borderRadius: 4,
+                          verticalAlign: "middle",
+                          cursor: "zoom-in",
+                        }}
+                      />
                     ) : (
                       <span className="muted">—</span>
                     )}
@@ -153,6 +166,48 @@ export default function SpendingPage() {
           </table>
         )}
       </div>
+
+      {zoomed && (
+        <div
+          onClick={() => setZoomed(null)}
+          role="dialog"
+          aria-label="Receipt"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.8)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+            cursor: "zoom-out",
+            zIndex: 100,
+          }}
+        >
+          <button
+            onClick={() => setZoomed(null)}
+            aria-label="Minimize"
+            style={{
+              position: "fixed",
+              top: 12,
+              right: 16,
+              fontSize: "1.5em",
+              background: "none",
+              border: "none",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            ✕
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/trips/${zoomed}/receipt`}
+            alt="receipt"
+            style={{ maxWidth: "95vw", maxHeight: "90vh", borderRadius: 6 }}
+          />
+        </div>
+      )}
     </>
   );
 }
