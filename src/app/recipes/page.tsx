@@ -1,55 +1,113 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-// Recipe library (§2) — browse, favorite, rename, delete, reuse. Search/tag
-// filtering is still a later refinement; the actions below are live.
+// Recipe library (§2) — browse, favorite, rename, delete; filter by ingredient
+// (tag-style); and add a recipe straight onto this week's meal plan (§3).
 
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+interface Ingredient {
+  name: string;
+}
 interface Recipe {
   id: string;
   name: string;
   source: string | null;
   statedServings: number;
   isFavorite: boolean;
-  ingredients: unknown[];
+  ingredients: Ingredient[];
+}
+interface Slot {
+  dayOfWeek: number;
+  recipeId: string | null;
+}
+interface WeekPlan {
+  id: string;
+  slots: Slot[];
 }
 
 export default function RecipesPage() {
   const [recipes, setRecipes] = useState<Recipe[] | null>(null);
+  const [plan, setPlan] = useState<WeekPlan | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [filters, setFilters] = useState<string[]>([]);
+  const [filterInput, setFilterInput] = useState("");
+  const [added, setAdded] = useState<Record<string, string>>({});
 
-  async function load() {
-    const rs = await fetch("/api/recipes").then((r) => r.json());
-    setRecipes(rs);
+  async function loadRecipes() {
+    setRecipes(await fetch("/api/recipes").then((r) => r.json()));
   }
   useEffect(() => {
-    load();
+    loadRecipes();
+    fetch("/api/plan")
+      .then((r) => r.json())
+      .then(setPlan);
   }, []);
 
-  async function patch(id: string, body: Partial<Recipe>) {
-    setRecipes((rs) =>
-      rs ? rs.map((r) => (r.id === id ? { ...r, ...body } : r)) : rs,
+  // Distinct ingredient names for the search autocomplete.
+  const suggestions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of recipes ?? [])
+      for (const i of r.ingredients) set.add(i.name);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [recipes]);
+
+  // AND filter: a recipe must contain every filter term (substring match).
+  const filtered = useMemo(() => {
+    if (!recipes) return [];
+    if (filters.length === 0) return recipes;
+    return recipes.filter((r) =>
+      filters.every((f) =>
+        r.ingredients.some((i) => i.name.toLowerCase().includes(f.toLowerCase())),
+      ),
     );
+  }, [recipes, filters]);
+
+  function addFilter() {
+    const f = filterInput.trim();
+    if (f && !filters.includes(f)) setFilters([...filters, f]);
+    setFilterInput("");
+  }
+
+  async function patch(id: string, body: Partial<Recipe>) {
+    setRecipes((rs) => (rs ? rs.map((r) => (r.id === id ? { ...r, ...body } : r)) : rs));
     await fetch(`/api/recipes/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
   }
-
   async function remove(id: string, name: string) {
     if (!confirm(`Delete "${name}"? This can't be undone.`)) return;
     setRecipes((rs) => (rs ? rs.filter((r) => r.id !== id) : rs));
     await fetch(`/api/recipes/${id}`, { method: "DELETE" });
   }
-
   async function saveRename(id: string) {
     const name = editName.trim();
     setEditingId(null);
     if (name) await patch(id, { name });
-    else await load(); // discard empty rename
+    else await loadRecipes();
+  }
+
+  function nextEmptyDay(): number {
+    const empty = plan?.slots.find((s) => s.recipeId == null);
+    return empty ? empty.dayOfWeek : 0;
+  }
+  async function addToPlan(recipeId: string, dayOfWeek: number) {
+    if (!plan) return;
+    setPlan({
+      ...plan,
+      slots: plan.slots.map((s) => (s.dayOfWeek === dayOfWeek ? { ...s, recipeId } : s)),
+    });
+    setAdded((a) => ({ ...a, [recipeId]: `Added to ${DAYS[dayOfWeek]} ✓` }));
+    await fetch("/api/plan", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ weekPlanId: plan.id, dayOfWeek, recipeId, servingsOverride: null }),
+    });
   }
 
   if (!recipes) return <p className="muted">Loading…</p>;
@@ -61,10 +119,58 @@ export default function RecipesPage() {
         <Link href="/recipes/new">+ Paste a new recipe</Link>
       </p>
 
-      {recipes.length === 0 ? (
-        <p className="muted">Nothing saved yet.</p>
+      <div className="card">
+        <h2>Find by ingredient</h2>
+        <p className="muted">
+          Add ingredients to narrow the list to recipes that contain all of them.
+        </p>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {filters.map((f) => (
+            <span
+              key={f}
+              style={{
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 999,
+                padding: "2px 10px",
+              }}
+            >
+              {f}{" "}
+              <button
+                onClick={() => setFilters(filters.filter((x) => x !== f))}
+                style={{ border: "none", background: "none", cursor: "pointer" }}
+                aria-label={`remove ${f}`}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          <input
+            list="ingredient-suggestions"
+            value={filterInput}
+            onChange={(e) => setFilterInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                addFilter();
+              }
+            }}
+            placeholder="e.g. blomkål"
+          />
+          <datalist id="ingredient-suggestions">
+            {suggestions.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="muted">
+          {filters.length ? "No recipes match those ingredients." : "Nothing saved yet."}
+        </p>
       ) : (
-        recipes.map((r) => (
+        filtered.map((r) => (
           <div className="card" key={r.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
@@ -110,15 +216,54 @@ export default function RecipesPage() {
                 </>
               )}
             </div>
-            <div className="muted" style={{ marginTop: 4 }}>
-              {r.ingredients.length} ingredients · serves {r.statedServings}
-              {r.source ? ` · ${r.source}` : ""}
+
+            <div
+              className="muted"
+              style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+            >
+              <span>
+                {r.ingredients.length} ingredients · serves {r.statedServings}
+                {r.source ? ` · ${r.source}` : ""}
+              </span>
+
+              {plan && (
+                <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                  {added[r.id] ? (
+                    <em>{added[r.id]}</em>
+                  ) : (
+                    <AddToPlan
+                      defaultDay={nextEmptyDay()}
+                      onAdd={(day) => addToPlan(r.id, day)}
+                    />
+                  )}
+                </span>
+              )}
             </div>
           </div>
         ))
       )}
+    </>
+  );
+}
 
-      {/* TODO: search box + tag filter. */}
+function AddToPlan({
+  defaultDay,
+  onAdd,
+}: {
+  defaultDay: number;
+  onAdd: (day: number) => void;
+}) {
+  const [day, setDay] = useState(defaultDay);
+  return (
+    <>
+      <select value={day} onChange={(e) => setDay(Number(e.target.value))}>
+        {DAYS.map((d, i) => (
+          <option key={i} value={i}>
+            {d}
+          </option>
+        ))}
+      </select>
+      <button onClick={() => onAdd(day)}>Add to plan</button>
     </>
   );
 }
