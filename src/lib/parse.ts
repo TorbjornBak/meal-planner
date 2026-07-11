@@ -29,8 +29,13 @@ export interface ParsedRecipe {
   instructions: string | null;
 }
 
-/** Danish measuring units we recognize as an ingredient's unit. */
+/**
+ * Measuring units we recognize as an ingredient's unit — Danish and English,
+ * so recipes pasted from Danish sites (anotherdayofeating, Vegetarisk Hverdag)
+ * and English ones (Ottolenghi) both parse.
+ */
 const UNITS = new Set([
+  // Danish
   "tsk",
   "spsk",
   "g",
@@ -44,20 +49,74 @@ const UNITS = new Set([
   "fed",
   "dåse",
   "dåser",
+  "ds",
   "knsp",
+  "håndfuld",
+  "bundt",
+  "pakke",
+  // English
+  "tsp",
+  "tbsp",
+  "cup",
+  "cups",
+  "oz",
+  "lb",
+  "lbs",
+  "pound",
+  "pounds",
+  "clove",
+  "cloves",
+  "can",
+  "cans",
+  "tin",
+  "tins",
+  "pinch",
+  "slice",
+  "slices",
+  "bunch",
+  "pack",
+  "packet",
+  "stick",
+  "sticks",
+  "sprig",
+  "sprigs",
 ]);
 
 /** Leading vague-quantity phrases we strip to get a clean ingredient name. */
 const VAGUE_PREFIX =
-  /^(en håndfuld|et drys|et nip|en knivspids|squish|lidt|et|en)\s+/i;
+  /^(en håndfuld|et drys|et nip|en knivspids|a handful of|a pinch of|a couple of|a few|squish|lidt|et|en|a|an)\s+/i;
 
-const INGREDIENTS_START = /hvad skal du bruge|ingredienser/i;
-const METHOD_START = /^(hvordan|fremgangs|s[åa]dan|tilberedning)/i;
+// Section markers, anchored to the start of a (trimmed) line so a stray mention
+// in the intro prose doesn't trip them. Danish + English.
+const INGREDIENTS_START = /^(hvad skal du bruge|ingredienser|ingredients)\b/i;
+const METHOD_START =
+  /^(hvordan|fremgangs|s[åa]dan|tilberedning|method|instructions?|directions?|preparation|steps?|how to)\b/i;
 // Sections that follow the method (tips / allergy notes / sign-off) — where the
 // instructions block ends.
-const NOTES_START = /^(opm[æae]rksomhed|tips|noter|god forn[øo]jelse)/i;
-const SERVINGS = /nok til\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*pers/i;
+const NOTES_START = /^(opm[æae]rksomhed|tips|noter|god forn[øo]jelse|notes?)\b/i;
 const BARE_DOMAIN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+
+// Servings phrasings, most specific first. Danish "Nok til 4 pers." / "4
+// portioner", English "Serves 4-6" / "Makes 12".
+const SERVINGS_PATTERNS: RegExp[] = [
+  /nok til\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*pers/i,
+  /serves?\s+(\d+)(?:\s*[–-]\s*(\d+))?/i,
+  /makes?\s+(\d+)(?:\s*[–-]\s*(\d+))?/i,
+  /(\d+)(?:\s*[–-]\s*(\d+))?\s*(?:portioner|portion|personer|pers\.?|servings?|people)/i,
+];
+
+/** First servings count found in the text (upper bound of a range), or null. */
+function servingsFrom(text: string): number | null {
+  for (const re of SERVINGS_PATTERNS) {
+    const m = text.match(re);
+    if (m) {
+      const lo = Number(m[1]);
+      const hi = m[2] ? Number(m[2]) : lo;
+      return Math.max(lo, hi);
+    }
+  }
+  return null;
+}
 
 export function parseRecipeText(text: string): ParsedRecipe {
   const rawLines = text.split(/\r?\n/).map((l) => l.trim());
@@ -100,11 +159,7 @@ function extractSource(lines: string[]): string | null {
 }
 
 function extractServings(text: string): number {
-  const m = text.match(SERVINGS);
-  if (!m) return 4; // sensible default; editable in review
-  const lo = Number(m[1]);
-  const hi = m[2] ? Number(m[2]) : lo;
-  return Math.max(lo, hi); // "3-4 pers." → 4
+  return servingsFrom(text) ?? 4; // default is editable in review
 }
 
 function extractIngredients(lines: string[]): ParsedIngredient[] {
@@ -121,28 +176,52 @@ function extractIngredients(lines: string[]): ParsedIngredient[] {
   return out;
 }
 
-/** All-caps lines are sub-section headers, not ingredients. */
+// Common sub-section headers that aren't all-caps (Vegetarisk Hverdag uses
+// title-case ones like "Sovs" / "Til servering"). Matched case-insensitively
+// against the whole line. Kept to clearly-non-ingredient words to avoid eating
+// a real single-word ingredient.
+const NAMED_HEADERS = new Set([
+  "til servering",
+  "til pynt",
+  "servering",
+  "pynt",
+  "topping",
+  "sovs",
+  "sauce",
+  "dressing",
+  "marinade",
+  "to serve",
+  "for serving",
+  "garnish",
+]);
+
+/** All-caps lines, or a known named header, are sub-sections, not ingredients. */
 function isSectionHeader(line: string): boolean {
-  return /[A-ZÆØÅ]/.test(line) && line === line.toUpperCase();
+  if (/[A-ZÆØÅ]/.test(line) && line === line.toUpperCase()) return true;
+  return NAMED_HEADERS.has(line.toLowerCase().replace(/:$/, "").trim());
 }
 
-/** Parse a servings value like "3-4", "4 personer", or "4" → an int (upper). */
+/** Parse a servings value like "3-4", "4 personer", "Serves 6", or "4" → int. */
 export function parseServingsText(value: string): number {
-  const m = value.match(SERVINGS) ?? value.match(/(\d+)(?:\s*[–-]\s*(\d+))?/);
+  const s = servingsFrom(value);
+  if (s != null) return s;
+  // Fall back to a bare number/range (e.g. JSON-LD recipeYield of "3-4").
+  const m = value.match(/(\d+)(?:\s*[–-]\s*(\d+))?/);
   if (!m) return 4;
-  const lo = Number(m[1]);
-  const hi = m[2] ? Number(m[2]) : lo;
-  return Math.max(lo, hi);
+  return Math.max(Number(m[1]), m[2] ? Number(m[2]) : Number(m[1]));
 }
 
 export function parseIngredientLine(line: string): ParsedIngredient {
-  // Optional leading amount, possibly a range ("6-8"), then the rest.
+  // Optional leading amount, possibly a range ("6-8"), then the rest. The gap
+  // after the number is optional so a unit stuck to it ("55g", "125ml") still
+  // parses — the unit then falls out as the first token of `rest`.
   const m = line.match(
-    /^(\d+(?:[.,]\d+)?)(?:\s*[–-]\s*(\d+(?:[.,]\d+)?))?\s+(.*)$/,
+    /^(\d+(?:[.,]\d+)?)(?:\s*[–-]\s*(\d+(?:[.,]\d+)?))?\s*(.*)$/,
   );
 
-  if (!m) {
-    // No leading number: to-taste / vague. Clean up the name.
+  const rest = m ? m[3].trim() : "";
+  if (!m || !rest) {
+    // No leading number (or nothing after it): to-taste / vague. Clean the name.
     return { name: cleanName(line), quantity: null, unit: null };
   }
 
@@ -150,8 +229,7 @@ export function parseIngredientLine(line: string): ParsedIngredient {
   const hi = m[2] ? Number(m[2].replace(",", ".")) : lo;
   const quantity = Math.max(lo, hi); // round up to buy enough
 
-  const rest = m[3].trim();
-  const firstTok = rest.split(/\s+/)[0].toLowerCase().replace(/\.$/, "");
+  const firstTok = rest.split(/\s+/)[0].toLowerCase().replace(/[.,]$/, "");
 
   if (UNITS.has(firstTok)) {
     const name = rest.slice(rest.indexOf(" ") + 1).trim();

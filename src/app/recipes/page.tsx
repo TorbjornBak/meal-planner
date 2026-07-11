@@ -8,6 +8,23 @@ import Link from "next/link";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+// A source is a URL/domain if it starts with http(s) or looks like "host.tld".
+function isSourceUrl(source: string): boolean {
+  return /^https?:\/\//i.test(source) || /^[a-z0-9-]+(?:\.[a-z0-9-]+)+/i.test(source);
+}
+function sourceHref(source: string): string {
+  return /^https?:\/\//i.test(source) ? source : `https://${source}`;
+}
+// Compact label for a source link — the bare hostname, so long URLs don't
+// overflow the card on mobile.
+function sourceLabel(source: string): string {
+  try {
+    return new URL(sourceHref(source)).hostname.replace(/^www\./, "");
+  } catch {
+    return source;
+  }
+}
+
 interface Ingredient {
   name: string;
 }
@@ -217,27 +234,41 @@ export default function RecipesPage() {
               )}
             </div>
 
-            <div
-              className="muted"
-              style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
-            >
-              <span>
-                {r.ingredients.length} ingredients · serves {r.statedServings}
-                {r.source ? ` · ${r.source}` : ""}
-              </span>
-
-              {plan && (
-                <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-                  {added[r.id] ? (
-                    <em>{added[r.id]}</em>
-                  ) : (
-                    <AddToPlan
-                      defaultDay={nextEmptyDay()}
-                      onAdd={(day) => addToPlan(r.id, day)}
-                    />
-                  )}
+            <div className="muted" style={{ marginTop: 4 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span>
+                  {r.ingredients.length} ingredients · serves {r.statedServings}
                 </span>
-              )}
+
+                {plan && (
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                    {added[r.id] ? (
+                      <em>{added[r.id]}</em>
+                    ) : (
+                      <AddToPlan
+                        defaultDay={nextEmptyDay()}
+                        onAdd={(day) => addToPlan(r.id, day)}
+                      />
+                    )}
+                  </span>
+                )}
+              </div>
+
+              {r.source &&
+                (isSourceUrl(r.source) ? (
+                  <div style={{ marginTop: 2 }}>
+                    <a
+                      href={sourceHref(r.source)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={r.source}
+                    >
+                      {sourceLabel(r.source)} ↗
+                    </a>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 2, overflowWrap: "anywhere" }}>{r.source}</div>
+                ))}
             </div>
           </div>
         ))

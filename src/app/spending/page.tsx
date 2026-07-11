@@ -34,6 +34,7 @@ export default function SpendingPage() {
   const [trips, setTrips] = useState<Trip[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [zoomed, setZoomed] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   // Esc minimizes the expanded receipt.
@@ -66,6 +67,36 @@ export default function SpendingPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveEdit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editingId) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/trips/${editingId}`, {
+        method: "PATCH",
+        body: new FormData(e.currentTarget),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        await load();
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(t: Trip) {
+    if (
+      !confirm(
+        `Delete the ${t.date.slice(0, 10)} trip to ${t.store}? This can't be undone.`,
+      )
+    )
+      return;
+    setTrips((ts) => (ts ? ts.filter((x) => x.id !== t.id) : ts));
+    if (editingId === t.id) setEditingId(null);
+    await fetch(`/api/trips/${t.id}`, { method: "DELETE" });
   }
 
   const weekStart = startOfWeek();
@@ -136,33 +167,92 @@ export default function SpendingPage() {
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <tbody>
-              {trips.map((t) => (
-                <tr key={t.id} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "6px 8px" }}>{t.date.slice(0, 10)}</td>
-                  <td style={{ padding: "6px 8px" }}>{t.store}</td>
-                  <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                    {money(Number(t.total))}
-                  </td>
-                  <td style={{ padding: "6px 8px" }}>
-                    {t.receipt ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/trips/${t.id}/receipt`}
-                        alt="receipt — click to enlarge"
-                        onClick={() => setZoomed(t.id)}
-                        style={{
-                          height: 32,
-                          borderRadius: 4,
-                          verticalAlign: "middle",
-                          cursor: "zoom-in",
-                        }}
-                      />
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {trips.map((t) =>
+                editingId === t.id ? (
+                  <tr key={t.id} style={{ borderTop: "1px solid var(--border)" }}>
+                    <td colSpan={5} style={{ padding: "8px" }}>
+                      <form
+                        onSubmit={saveEdit}
+                        style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}
+                      >
+                        <label>
+                          Date
+                          <br />
+                          <input type="date" name="date" defaultValue={t.date.slice(0, 10)} required />
+                        </label>
+                        <label>
+                          Store
+                          <br />
+                          <input type="text" name="store" defaultValue={t.store} required />
+                        </label>
+                        <label>
+                          Total (kr)
+                          <br />
+                          <input
+                            type="number"
+                            name="total"
+                            step="0.01"
+                            min="0"
+                            defaultValue={Number(t.total)}
+                            required
+                            style={{ width: 110 }}
+                          />
+                        </label>
+                        <label>
+                          {t.receipt ? "Replace receipt" : "Receipt photo"}
+                          <br />
+                          <input type="file" name="photo" accept="image/*" />
+                        </label>
+                        {t.receipt && (
+                          <label style={{ fontSize: "0.9em" }}>
+                            <input type="checkbox" name="removePhoto" value="1" /> Remove photo
+                          </label>
+                        )}
+                        <button type="submit" disabled={busy}>
+                          {busy ? "Saving…" : "Save"}
+                        </button>
+                        <button type="button" className="muted" onClick={() => setEditingId(null)}>
+                          Cancel
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={t.id} style={{ borderTop: "1px solid var(--border)" }}>
+                    <td style={{ padding: "6px 8px" }}>{t.date.slice(0, 10)}</td>
+                    <td style={{ padding: "6px 8px" }}>{t.store}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                      {money(Number(t.total))}
+                    </td>
+                    <td style={{ padding: "6px 8px" }}>
+                      {t.receipt ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`/api/trips/${t.id}/receipt`}
+                          alt="receipt — click to enlarge"
+                          onClick={() => setZoomed(t.id)}
+                          style={{
+                            height: 32,
+                            borderRadius: 4,
+                            verticalAlign: "middle",
+                            cursor: "zoom-in",
+                          }}
+                        />
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "6px 8px", whiteSpace: "nowrap", textAlign: "right" }}>
+                      <button className="muted" onClick={() => setEditingId(t.id)}>
+                        Edit
+                      </button>{" "}
+                      <button className="muted" onClick={() => remove(t)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ),
+              )}
             </tbody>
           </table>
             </div>
