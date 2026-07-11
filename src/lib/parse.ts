@@ -101,7 +101,7 @@ const NOTES_START = /^(opm[æae]rksomhed|tips|noter|god forn[øo]jelse|notes?)\b
 // one we hit marks the end of the instructions. Ottolenghi's footer starts with
 // "Quick add" / "View basket"; the rest are defensive.
 const BOILERPLATE_STOP =
-  /^(quick add|view basket|view cart|add to basket|add to cart|checkout|all done|close follow mode|follow mode|tag @|tag us|share with friends|share this|you may also like|on social|experience ottolenghi|book a table|buy a gift voucher|add comment|be the first|lock thread|next step|choosing a selection|opens in a new window|privacy and cookies|terms and conditions|terms of use|site by|all rights? reserved|©|copyright)\b/i;
+  /^(quick add|quick buy|added to your (cart|basket)|view basket|view cart|add to basket|add to cart|your (cart|basket)|continue shopping|are you over \d+|checkout|all done|close follow mode|follow mode|tag @|tag us|share with friends|share this|you may also like|on social|experience ottolenghi|book a table|buy a gift voucher|add comment|be the first|lock thread|next step|choosing a selection|opens in a new window|privacy and cookies|terms and conditions|terms of use|site by|all rights? reserved|©|copyright)\b/i;
 
 const BARE_DOMAIN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 
@@ -197,15 +197,65 @@ function extractServings(text: string): number {
 }
 
 function extractIngredients(lines: string[]): ParsedIngredient[] {
-  const start = lines.findIndex((l) => INGREDIENTS_START.test(l));
+  const methodIdx = lines.findIndex((l) => METHOD_START.test(l));
+  const limit = methodIdx === -1 ? lines.length : methodIdx;
+
+  // A whole-page capture can carry a nav/shop "Ingredients" link before the
+  // recipe's own heading (e.g. Ottolenghi's mega-menu). The real list is the
+  // last "Ingredients" before the method, so scan forward and keep the latest.
+  let start = -1;
+  for (let i = 0; i < limit; i++) {
+    if (INGREDIENTS_START.test(lines[i])) start = i;
+  }
   if (start === -1) return [];
 
-  const out: ParsedIngredient[] = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (METHOD_START.test(line)) break; // reached the method section
-    if (isSectionHeader(line)) continue; // e.g. BLOMKÅL / ÆRTECREME / TOPPING
-    out.push(parseIngredientLine(line));
+  const raw: string[] = [];
+  for (let i = start + 1; i < limit; i++) {
+    if (BOILERPLATE_STOP.test(lines[i])) break; // page-footer chrome
+    if (isSectionHeader(lines[i])) continue; // e.g. BLOMKÅL / ÆRTECREME
+    raw.push(lines[i]);
+  }
+  return mergeSplitAmounts(raw).map(parseIngredientLine);
+}
+
+/**
+ * A line that is *only* a quantity, optionally followed by a unit (possibly
+ * duplicated, as some rendered pages emit "4 tbsp tbsp" / "55 g g"). Returns the
+ * normalized "amount [unit]" string, or null if the line carries a real name.
+ */
+function amountOnly(line: string): string | null {
+  const m = line.match(
+    /^(\d+(?:[.,]\d+)?(?:\s*[–-]\s*\d+(?:[.,]\d+)?)?)((?:\s+[\p{L}.]+)*)$/u,
+  );
+  if (!m) return null;
+  const tail = m[2].trim();
+  if (tail === "") return m[1];
+  const toks = tail.split(/\s+/).map((t) => t.toLowerCase().replace(/\.$/, ""));
+  return toks.every((t) => UNITS.has(t)) ? `${m[1]} ${toks[0]}` : null;
+}
+
+/**
+ * Some captures put an ingredient's amount and name on separate lines ("2" then
+ * "small butternut squash"). Fold an amount-only line into the following name
+ * line so it parses as one ingredient.
+ */
+function mergeSplitAmounts(lines: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const amount = amountOnly(lines[i]);
+    const next = lines[i + 1];
+    if (
+      amount &&
+      next &&
+      amountOnly(next) === null &&
+      !/^\d/.test(next) &&
+      !isSectionHeader(next)
+    ) {
+      out.push(`${amount} ${next}`);
+      i++; // consumed the name line
+    } else {
+      out.push(lines[i]);
+    }
   }
   return out;
 }
