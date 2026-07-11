@@ -245,7 +245,35 @@ export function parseServingsText(value: string): number {
   return Math.max(Number(m[1]), m[2] ? Number(m[2]) : Number(m[1]));
 }
 
-export function parseIngredientLine(line: string): ParsedIngredient {
+// Unicode fraction glyphs → decimal, so "½ dl" / "1½" parse to a real quantity.
+const FRACTIONS: Record<string, number> = {
+  "½": 0.5,
+  "⅓": 1 / 3,
+  "⅔": 2 / 3,
+  "¼": 0.25,
+  "¾": 0.75,
+  "⅕": 0.2,
+  "⅖": 0.4,
+  "⅗": 0.6,
+  "⅘": 0.8,
+  "⅙": 1 / 6,
+  "⅛": 0.125,
+  "⅜": 0.375,
+  "⅝": 0.625,
+  "⅞": 0.875,
+};
+const FRACTION_RE = /(\d+)?\s*([½⅓⅔¼¾⅕⅖⅗⅘⅙⅛⅜⅝⅞])/g;
+
+/** "½ dl" → "0.5 dl", "1½ tsk" → "1.5 tsk". */
+function normalizeFractions(line: string): string {
+  return line.replace(FRACTION_RE, (_m, whole: string | undefined, frac: string) => {
+    const val = (whole ? Number(whole) : 0) + FRACTIONS[frac];
+    return String(Number(val.toFixed(3)));
+  });
+}
+
+export function parseIngredientLine(rawLine: string): ParsedIngredient {
+  const line = normalizeFractions(rawLine);
   // Optional leading amount, possibly a range ("6-8"), then the rest. The gap
   // after the number is optional so a unit stuck to it ("55g", "125ml") still
   // parses — the unit then falls out as the first token of `rest`.
@@ -276,7 +304,11 @@ export function parseIngredientLine(line: string): ParsedIngredient {
 
 function cleanName(name: string): string {
   return name
+    // "[object Object]" leaks from sites whose JSON-LD serializes a unit object
+    // wrong (e.g. meyers.dk emits "150 [object Object] smør").
+    .replace(/\[object Object\]/gi, " ")
     .replace(VAGUE_PREFIX, "") // drop "en håndfuld", "squish", …
     .replace(/\s*\([^)]*\)\s*$/, "") // drop a trailing "(valgfrit)" note
+    .replace(/\s{2,}/g, " ")
     .trim();
 }
