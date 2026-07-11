@@ -219,18 +219,19 @@ function extractIngredients(lines: string[]): ParsedIngredient[] {
 }
 
 /**
- * A line that is *only* a quantity, optionally followed by a unit (possibly
- * duplicated, as some rendered pages emit "4 tbsp tbsp" / "55 g g"). Returns the
- * normalized "amount [unit]" string, or null if the line carries a real name.
+ * A line that is *only* a quantity, optionally followed by a unit — which some
+ * rendered pages duplicate and/or stick to the number: "4 tbsp tbsp", "55g g",
+ * "125ml ml". Returns the normalized "amount [unit]" string, or null if the
+ * line carries a real ingredient name.
  */
 function amountOnly(line: string): string | null {
-  const m = line.match(
-    /^(\d+(?:[.,]\d+)?(?:\s*[–-]\s*\d+(?:[.,]\d+)?)?)((?:\s+[\p{L}.]+)*)$/u,
-  );
+  // Leading number (+optional range); the rest may start with a unit stuck to
+  // the number ("55g" → rest "g g"), so don't require a space here.
+  const m = line.match(/^(\d+(?:[.,]\d+)?(?:\s*[–-]\s*\d+(?:[.,]\d+)?)?)(.*)$/);
   if (!m) return null;
-  const tail = m[2].trim();
-  if (tail === "") return m[1];
-  const toks = tail.split(/\s+/).map((t) => t.toLowerCase().replace(/\.$/, ""));
+  const rest = m[2].trim();
+  if (rest === "") return m[1];
+  const toks = rest.split(/\s+/).map((t) => t.toLowerCase().replace(/[.,]$/, ""));
   return toks.every((t) => UNITS.has(t)) ? `${m[1]} ${toks[0]}` : null;
 }
 
