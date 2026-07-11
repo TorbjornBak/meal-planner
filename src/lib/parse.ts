@@ -94,6 +94,15 @@ const METHOD_START =
 // Sections that follow the method (tips / allergy notes / sign-off) — where the
 // instructions block ends.
 const NOTES_START = /^(opm[æae]rksomhed|tips|noter|god forn[øo]jelse|notes?)\b/i;
+
+// Page chrome that appears after the recipe on modern sites (cart, share
+// widgets, "you may also like", footer nav) — pasting a whole page drags it in.
+// These distinctive lines never occur inside a real cooking step, so the first
+// one we hit marks the end of the instructions. Ottolenghi's footer starts with
+// "Quick add" / "View basket"; the rest are defensive.
+const BOILERPLATE_STOP =
+  /^(quick add|view basket|view cart|add to basket|add to cart|checkout|all done|close follow mode|follow mode|tag @|tag us|share with friends|share this|you may also like|on social|experience ottolenghi|book a table|buy a gift voucher|add comment|be the first|lock thread|next step|choosing a selection|opens in a new window|privacy and cookies|terms and conditions|terms of use|site by|all rights? reserved|©|copyright)\b/i;
+
 const BARE_DOMAIN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
 
 // Servings phrasings, most specific first. Danish "Nok til 4 pers." / "4
@@ -137,17 +146,42 @@ function extractInstructions(lines: string[]): string | null {
 
   const steps: string[] = [];
   for (let i = start + 1; i < lines.length; i++) {
-    if (NOTES_START.test(lines[i])) break; // reached tips / notes section
+    // Stop at a notes/tips section or at the page-footer chrome that follows
+    // the recipe when a whole page is pasted.
+    if (NOTES_START.test(lines[i]) || BOILERPLATE_STOP.test(lines[i])) break;
     steps.push(lines[i]);
   }
   const text = steps.join("\n").trim();
   return text.length > 0 ? text : null;
 }
 
+/** Strip a trailing " — Site Name" / " | Site Name" suffix from a title. */
+function cleanTitle(line: string): string {
+  return line.split(/\s+[—–|]\s+/)[0].split(/\s[—–-]\s/)[0].trim() || line;
+}
+
 function extractTitle(lines: string[]): string {
-  // First non-empty line is the title; strip a trailing " — site name" suffix.
-  const first = lines[0] ?? "Untitled recipe";
-  return first.split(/\s[—–-]\s/)[0].trim() || first;
+  // Pasting a whole page puts nav chrome ("Drinks", "Tableware", cart links)
+  // above the dish name, so the first line isn't reliably the title. The
+  // servings line ("Serves 4-6", "4 portioner", "Nok til 3-4 pers.") sits just
+  // below the title block, so anchor on it.
+  const sIdx = lines.findIndex((l) => servingsFrom(l) != null);
+
+  if (sIdx > 0) {
+    const above = lines.slice(0, sIdx);
+    // Recipe sites repeat the dish name near the top (breadcrumb, H1, share
+    // widgets). If a line above the servings line recurs, it's the title; walk
+    // upward so the repeat closest to the servings line wins.
+    const counts = new Map<string, number>();
+    for (const l of above) counts.set(l, (counts.get(l) ?? 0) + 1);
+    for (let i = above.length - 1; i >= 0; i--) {
+      if ((counts.get(above[i]) ?? 0) >= 2) return cleanTitle(above[i]);
+    }
+    // No repeat (e.g. anotherdayofeating): the line just above servings is it.
+    return cleanTitle(above[above.length - 1]);
+  }
+
+  return cleanTitle(lines[0] ?? "Untitled recipe");
 }
 
 function extractSource(lines: string[]): string | null {
