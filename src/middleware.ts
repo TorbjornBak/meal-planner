@@ -16,6 +16,10 @@ export async function middleware(req: NextRequest) {
     // household capture token instead of the session cookie.
     pathname === "/api/capture" ||
     pathname.startsWith("/_next") ||
+    // Home-screen install assets must load before the user has a session.
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/apple-icon.png" ||
+    pathname.startsWith("/icon") ||
     pathname === "/favicon.ico";
 
   if (isPublic) return NextResponse.next();
