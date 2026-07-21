@@ -20,6 +20,10 @@ export async function middleware(req: NextRequest) {
     pathname === "/manifest.webmanifest" ||
     pathname === "/apple-icon.png" ||
     pathname.startsWith("/icon") ||
+    // Offline support: the service worker and its fallback page load
+    // independently of the session.
+    pathname === "/sw.js" ||
+    pathname === "/offline.html" ||
     pathname === "/favicon.ico";
 
   if (isPublic) return NextResponse.next();

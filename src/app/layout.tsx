@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { ServiceWorkerRegistrar } from "./sw-register";
 
 export const metadata: Metadata = {
   title: "MealPlanner",
@@ -23,6 +24,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <ServiceWorkerRegistrar />
         <nav className="topnav">
           <Link href="/">Dashboard</Link>
           <Link href="/plan">Plan</Link>
