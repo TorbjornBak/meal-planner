@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 
 // Weekly dinner plan (§3, §4).
 
@@ -28,7 +29,10 @@ export async function GET(req: Request) {
       slots: { create: Array.from({ length: 7 }, (_, dayOfWeek) => ({ dayOfWeek })) },
     },
     include: {
-      slots: { orderBy: { dayOfWeek: "asc" }, include: { recipe: true } },
+      slots: {
+        orderBy: { dayOfWeek: "asc" },
+        include: { recipe: { omit: OMIT_RECIPE_BLOBS } },
+      },
     },
   });
 
@@ -54,7 +58,7 @@ export async function PATCH(req: Request) {
   const slot = await prisma.dinnerSlot.update({
     where: { weekPlanId_dayOfWeek: { weekPlanId, dayOfWeek } },
     data: { recipeId, servingsOverride: servingsOverride ?? null },
-    include: { recipe: true },
+    include: { recipe: { omit: OMIT_RECIPE_BLOBS } },
   });
 
   return NextResponse.json(slot);

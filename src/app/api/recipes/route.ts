@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 
 // Recipe library CRUD (§2).
 
@@ -23,6 +24,7 @@ const RecipeInput = z.object({
 export async function GET() {
   const recipes = await prisma.recipe.findMany({
     orderBy: [{ isFavorite: "desc" }, { name: "asc" }],
+    omit: OMIT_RECIPE_BLOBS,
     include: { ingredients: { orderBy: { position: "asc" } } },
   });
   return NextResponse.json(recipes);
@@ -53,6 +55,7 @@ export async function POST(req: Request) {
         })),
       },
     },
+    omit: OMIT_RECIPE_BLOBS,
     include: { ingredients: true },
   });
 

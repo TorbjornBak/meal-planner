@@ -28,6 +28,13 @@ model Recipe {
   sourceHtml     String?
   /// Servings the recipe is written for; scaling divides by this. (§4)
   statedServings Int
+  /// Where the photo came from — the source page's og:image / JSON-LD image.
+  /// Kept for provenance and as a fallback when we hold no bytes of our own.
+  imageUrl       String?
+  /// The recipe photo itself, stored in the database like receipt photos (§7)
+  /// so the app stays self-contained and works offline over Tailscale.
+  image          Bytes?
+  imageMime      String?
   isFavorite     Boolean         @default(false)
   tags           String[]        @default([])
   ingredients    IngredientLine[]

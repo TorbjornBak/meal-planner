@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { OMIT_RECIPE_BLOBS, recipeImageSrc } from "@/lib/recipeImage";
 
 // Recipe cooking view (§2) — ingredients + method, rendered for use at the
 // stove, with a link back to the original source if we have one.
@@ -49,11 +50,15 @@ export default async function RecipeDetailPage({
   const { id } = await params;
   const recipe = await prisma.recipe.findUnique({
     where: { id },
+    // The photo is fetched by the browser from its own endpoint; no need to
+    // drag its bytes (or the captured page HTML) through the render.
+    omit: OMIT_RECIPE_BLOBS,
     include: { ingredients: { orderBy: { position: "asc" } } },
   });
   if (!recipe) notFound();
 
   const sections = recipe.instructions ? toSections(recipe.instructions) : [];
+  const photo = recipeImageSrc(recipe);
 
   return (
     <>
@@ -61,6 +66,13 @@ export default async function RecipeDetailPage({
         <Link href="/recipes">← Recipes</Link>
         <Link href={`/recipes/${recipe.id}/edit`}>Edit</Link>
       </p>
+
+      {photo && (
+        // Plain <img>: the photo is served from our own API route, already
+        // sized by whoever we got it from, and next/image would want a loader.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photo} alt="" className="recipe-hero" />
+      )}
 
       <h1>
         {recipe.isFavorite ? "★ " : ""}

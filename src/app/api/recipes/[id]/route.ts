@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 
 // Rename, favorite, and delete for a single recipe (§2).
 
@@ -12,6 +13,7 @@ export async function GET(
   const { id } = await params;
   const recipe = await prisma.recipe.findUnique({
     where: { id },
+    omit: OMIT_RECIPE_BLOBS,
     include: { ingredients: { orderBy: { position: "asc" } } },
   });
   if (!recipe) {
@@ -68,6 +70,7 @@ export async function PATCH(
     }
     return tx.recipe.findUnique({
       where: { id },
+      omit: OMIT_RECIPE_BLOBS,
       include: { ingredients: { orderBy: { position: "asc" } } },
     });
   });

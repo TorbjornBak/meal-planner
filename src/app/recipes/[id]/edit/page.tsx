@@ -1,11 +1,13 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { MAX_IMAGE_BYTES } from "@/lib/recipeImage";
 
 // Full recipe editor (§2). Edit name, source, servings, ingredients (add/remove
-// rows), and the method. Backed by PATCH /api/recipes/[id].
+// rows), the method, and the photo. Backed by PATCH /api/recipes/[id] and
+// /api/recipes/[id]/image.
 
 interface Ingredient {
   name: string;
@@ -30,10 +32,20 @@ export default function EditRecipePage({
   const [form, setForm] = useState<RecipeForm | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Photo state is separate from the form: it saves immediately rather than on
+  // "Save changes", because it's a binary body, not part of the JSON PATCH.
+  const [hasPhoto, setHasPhoto] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState<null | "upload" | "source">(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  // Bumped after every change so the browser re-requests the (cached) photo URL.
+  const [photoVersion, setPhotoVersion] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     fetch(`/api/recipes/${id}`)
       .then((r) => r.json())
-      .then((r) =>
+      .then((r) => {
+        setHasPhoto(Boolean(r.imageMime || r.imageUrl));
         setForm({
           name: r.name,
           source: r.source,
@@ -44,9 +56,71 @@ export default function EditRecipePage({
             quantity: i.quantity,
             unit: i.unit,
           })),
-        }),
-      );
+        });
+      });
   }, [id]);
+
+  async function uploadPhoto(file: File) {
+    setPhotoError(null);
+    if (file.size > MAX_IMAGE_BYTES) {
+      setPhotoError(
+        `That image is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is ${
+          MAX_IMAGE_BYTES / 1024 / 1024
+        } MB.`,
+      );
+      return;
+    }
+    setPhotoBusy("upload");
+    try {
+      const res = await fetch(`/api/recipes/${id}/image`, {
+        method: "POST",
+        headers: { "content-type": file.type },
+        body: file,
+      });
+      if (!res.ok) {
+        setPhotoError(
+          res.status === 415
+            ? "That file type isn't supported — use JPEG, PNG, WebP or GIF."
+            : "Couldn't save that image.",
+        );
+        return;
+      }
+      setHasPhoto(true);
+      setPhotoVersion((v) => v + 1);
+    } finally {
+      setPhotoBusy(null);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function fetchPhotoFromSource() {
+    setPhotoError(null);
+    setPhotoBusy("source");
+    try {
+      const res = await fetch(`/api/recipes/${id}/image`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!res.ok) {
+        setPhotoError(
+          "Couldn't find a photo on the source page — add one from your device instead.",
+        );
+        return;
+      }
+      setHasPhoto(true);
+      setPhotoVersion((v) => v + 1);
+    } finally {
+      setPhotoBusy(null);
+    }
+  }
+
+  async function removePhoto() {
+    setPhotoError(null);
+    setHasPhoto(false);
+    setPhotoVersion((v) => v + 1);
+    await fetch(`/api/recipes/${id}/image`, { method: "DELETE" });
+  }
 
   function editIngredient(i: number, patch: Partial<Ingredient>) {
     if (!form) return;
@@ -126,6 +200,59 @@ export default function EditRecipePage({
             />
           </label>
         </div>
+      </div>
+
+      <div className="card">
+        <h2>Photo</h2>
+        {hasPhoto ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/recipes/${id}/image?v=${photoVersion}`}
+            alt=""
+            className="recipe-hero"
+          />
+        ) : (
+          <p className="muted">
+            No photo yet. Captured recipes pick one up from the source page
+            automatically.
+          </p>
+        )}
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) uploadPhoto(file);
+            }}
+            disabled={photoBusy !== null}
+            style={{ maxWidth: "100%" }}
+          />
+          <button
+            onClick={fetchPhotoFromSource}
+            disabled={photoBusy !== null || !form.source}
+            title={
+              form.source
+                ? "Download the photo the source page uses"
+                : "Add a source link first"
+            }
+          >
+            {photoBusy === "source" ? "Fetching…" : "Fetch from source"}
+          </button>
+          {hasPhoto && (
+            <button className="muted" onClick={removePhoto} disabled={photoBusy !== null}>
+              Remove photo
+            </button>
+          )}
+        </div>
+        {photoBusy === "upload" && <p className="muted">Uploading…</p>}
+        {photoError && (
+          <p className="muted" style={{ color: "var(--accent)" }}>
+            {photoError}
+          </p>
+        )}
       </div>
 
       <div className="card">

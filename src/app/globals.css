@@ -133,8 +133,186 @@ table {
   border-collapse: collapse;
 }
 
+/* --- Recipe photos --------------------------------------------------------- */
+
+.recipe-hero {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+  background: var(--bg);
+}
+
+/* Library rows: photo on the left, everything else in a column beside it. */
+.recipe-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+.recipe-row-body {
+  flex: 1;
+  min-width: 0;
+}
+.recipe-thumb {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  overflow: hidden;
+}
+.recipe-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Stand-in for recipes with no photo — keeps rows and cells the same height. */
+.recipe-thumb-empty {
+  font-size: 1.5rem;
+  opacity: 0.35;
+}
+
+/* --- Weekly calendar (plan page) ------------------------------------------- */
+
+/*
+ * Seven day-columns need more room than the 780px reading column, so the plan
+ * page breaks out of `.container` and centres itself on the viewport instead.
+ */
+.calendar-page {
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1120px, calc(100vw - 2rem));
+}
+
+.week-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.week-header-title {
+  flex: 1;
+  text-align: center;
+}
+.week-header-title h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.calendar {
+  display: grid;
+  gap: 0.6rem;
+  /* One column per weekday where there's room; falls back to fewer, wider
+     cards on narrow screens rather than squeezing seven of them. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0.75rem 0 1rem;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem;
+  min-height: 190px;
+}
+.day-today {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.day-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.day-date {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.day-today .day-date {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Takes the slack so every card's picker sits on the same baseline. */
+.day-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.day-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  overflow: hidden;
+}
+.day-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.day-title {
+  color: var(--fg);
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.day-serves {
+  font-size: 0.85em;
+}
+.day-serves input {
+  width: 4.5rem;
+  min-height: 32px;
+  padding: 0.2rem 0.4rem;
+}
+.day-empty {
+  margin: 0;
+  font-size: 0.9em;
+}
+
+/* Full-width so the whole bottom of a card is a tap target on a phone. */
+.day-picker {
+  width: 100%;
+  min-height: 36px;
+  padding: 0.3rem 0.4rem;
+  font-size: 16px;
+}
+
 @media (max-width: 480px) {
   .container {
     padding: 0.75rem;
+  }
+  .calendar-page {
+    width: 100%;
+    left: 0;
+    transform: none;
+  }
+  /* Two days per row keeps the week glanceable without hair-thin cards. */
+  .calendar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .day {
+    min-height: 0;
   }
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { recipeImageSrc } from "@/lib/recipeImage";
 
 // Recipe library (§2) — browse, favorite, rename, delete; filter by ingredient
 // (tag-style); and add a recipe straight onto this week's meal plan (§3).
@@ -34,6 +35,10 @@ interface Recipe {
   source: string | null;
   statedServings: number;
   isFavorite: boolean;
+  /// Set when we hold the photo's bytes; imageUrl when we only know where it
+  /// lives. Either one means there's something to show.
+  imageMime: string | null;
+  imageUrl: string | null;
   ingredients: Ingredient[];
 }
 interface Slot {
@@ -188,7 +193,23 @@ export default function RecipesPage() {
         </p>
       ) : (
         filtered.map((r) => (
-          <div className="card" key={r.id}>
+          <div className="card recipe-row" key={r.id}>
+            {/* Decorative: the recipe name beside it is the real link. */}
+            <Link
+              href={`/recipes/${r.id}`}
+              className="recipe-thumb"
+              tabIndex={-1}
+              aria-hidden
+            >
+              {recipeImageSrc(r) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={recipeImageSrc(r)!} alt="" loading="lazy" />
+              ) : (
+                <span className="recipe-thumb-empty">🍽</span>
+              )}
+            </Link>
+
+            <div className="recipe-row-body">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <button
                 onClick={() => patch(r.id, { isFavorite: !r.isFavorite })}
@@ -269,6 +290,7 @@ export default function RecipesPage() {
                 ) : (
                   <div style={{ marginTop: 2, overflowWrap: "anywhere" }}>{r.source}</div>
                 ))}
+            </div>
             </div>
           </div>
         ))

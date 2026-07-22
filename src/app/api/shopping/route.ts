@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 import { aggregateShoppingList, type SlotForList } from "@/lib/shopping";
 
 // Shopping list generation + retrieval (§5).
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
     include: {
       slots: {
         include: {
-          recipe: { include: { ingredients: true } },
+          recipe: { omit: OMIT_RECIPE_BLOBS, include: { ingredients: true } },
         },
       },
     },

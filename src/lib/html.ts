@@ -79,6 +79,87 @@ export function extractHtmlTitle(html: string): string | null {
   return null;
 }
 
+// --- Recipe photo -------------------------------------------------------------
+
+/**
+ * The recipe's photo URL as the page itself advertises it. Same order of trust
+ * as the recipe extraction: schema.org first, then the social-share metadata
+ * every site sets for link previews, and finally Twitter's variant.
+ *
+ * Returns the URL as written in the page — possibly relative; the caller
+ * resolves it against the captured page URL.
+ */
+export function extractRecipeImageUrl(html: string): string | null {
+  const fromJsonLd = extractJsonLdImageUrl(html);
+  if (fromJsonLd) return fromJsonLd;
+
+  for (const prop of ["og:image:secure_url", "og:image", "twitter:image"]) {
+    const meta = metaContent(html, prop);
+    if (meta) return meta;
+  }
+
+  // Microdata recipes (valdemarsro.dk) hang the photo off itemprop="image",
+  // almost always on a void <img> — which has no closing tag, so `itemprops`
+  // can't see it. Read the attributes off the tag directly.
+  const img = html.match(/<img\b[^>]*\bitemprop=["']image["'][^>]*>/i);
+  if (img) {
+    const src =
+      img[0].match(/\bsrc=["']([^"']+)["']/i) ??
+      img[0].match(/\bcontent=["']([^"']+)["']/i);
+    if (src) return decodeEntities(src[1]).trim() || null;
+  }
+
+  return null;
+}
+
+/** `content` of a <meta> tagged with `property=` or `name=` — either order. */
+function metaContent(html: string, prop: string): string | null {
+  const attr = `(?:property|name)=["']${prop.replace(/[:]/g, "[:]")}["']`;
+  const m =
+    html.match(new RegExp(`<meta[^>]+${attr}[^>]+content=["']([^"']+)["']`, "i")) ??
+    html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+${attr}`, "i"));
+  return m ? decodeEntities(m[1]).trim() || null : null;
+}
+
+/** The `image` field of the page's schema.org Recipe node, if it has one. */
+function extractJsonLdImageUrl(html: string): string | null {
+  const scripts = [
+    ...html.matchAll(
+      /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+    ),
+  ];
+
+  for (const s of scripts) {
+    let data: unknown;
+    try {
+      data = JSON.parse(s[1].trim());
+    } catch {
+      continue;
+    }
+    const node = findRecipeNode(data);
+    const url = node ? firstImageUrl(node.image) : null;
+    if (url) return url;
+  }
+  return null;
+}
+
+/**
+ * schema.org `image` is a union: a URL string, an ImageObject, or an array of
+ * either. Take the first usable URL out of whichever shape we got.
+ */
+function firstImageUrl(value: unknown): string | null {
+  for (const item of toArray(value)) {
+    const direct = asString(item);
+    if (direct?.trim()) return direct.trim();
+    if (item && typeof item === "object") {
+      const obj = item as Record<string, unknown>;
+      const url = asString(obj.url) ?? asString(obj.contentUrl);
+      if (url?.trim()) return url.trim();
+    }
+  }
+  return null;
+}
+
 // --- JSON-LD ------------------------------------------------------------------
 
 export function extractJsonLdRecipe(html: string): ParsedRecipe | null {

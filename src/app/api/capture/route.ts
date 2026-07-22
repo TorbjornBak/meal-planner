@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isValidCaptureToken } from "@/lib/auth";
-import { parseRecipeHtml } from "@/lib/html";
+import { extractRecipeImageUrl, parseRecipeHtml } from "@/lib/html";
+import { fetchImage, resolvePublicUrl } from "@/lib/image";
 
 // POST /api/capture — bookmarklet capture (§1). The browser (where you're
 // viewing the page as a normal reader) sends { token, url, html }; we parse it
@@ -38,6 +39,13 @@ export async function POST(req: Request) {
 
   const draft = parseRecipeHtml(body.html);
 
+  // The page's own photo, downloaded so the recipe carries its picture without
+  // hotlinking. Best-effort: a missing or unreachable image never fails the
+  // capture — you can always add one by hand on the edit page.
+  const rawImageUrl = extractRecipeImageUrl(body.html);
+  const imageUrl = rawImageUrl ? resolvePublicUrl(rawImageUrl, body.url) : null;
+  const image = imageUrl ? await fetchImage(imageUrl) : null;
+
   const recipe = await prisma.recipe.create({
     data: {
       name: draft.name,
@@ -45,6 +53,10 @@ export async function POST(req: Request) {
       instructions: draft.instructions ?? null,
       sourceHtml: body.html,
       statedServings: draft.statedServings,
+      imageUrl,
+      // Prisma's Bytes field wants a plain Uint8Array, not a Buffer.
+      image: image ? new Uint8Array(image.bytes) : null,
+      imageMime: image?.mime ?? null,
       ingredients: {
         create: draft.ingredients.map((ing, i) => ({
           name: ing.name,

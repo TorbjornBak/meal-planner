@@ -26,10 +26,32 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   rename, and delete**.
 - The library is a first-class asset, not dead storage.
 
-## 3. Meal plan — dinners only
+## 3. Meal plan — dinners only, as a calendar week
 
-- 7 dinner slots per week.
+- 7 dinner slots per week, laid out as a **calendar week** — one card per night,
+  Monday to Sunday, with the date and today highlighted.
 - Nights can be left empty (leftovers / eating out).
+- **Page back and forward through weeks.** Asking for a week creates it, so next
+  week's plan exists the moment you look at it.
+- Each night shows the recipe's photo (§2b) and links through to the cooking view.
+
+## 2b. Recipe photos
+
+- A recipe can carry **one photo**, shown on the cooking view, in the library
+  list, and on its night in the calendar.
+- **Captured recipes bring their own.** The page you captured already declares
+  its photo (schema.org `image`, `og:image`, `twitter:image`); we read that URL
+  out of the captured HTML and **download the image once**. Best-effort — a
+  missing or unreachable photo never fails a capture.
+- **Or add one yourself** from the edit page: upload from the device, or ask us
+  to fetch the source page's photo for a recipe that predates this.
+- Stored **as bytes in the database**, like receipt photos (§7) — not
+  hotlinked. The app has to work offline over Tailscale (§10), and a hotlinked
+  photo dies the day the source site reorganizes. Capped at 5 MB.
+- The **one** place the server reaches out to the open web. It fetches a single
+  image by URL, guarded against private-network addresses; recipe *content*
+  still comes from your browser (§1). Fetching the source *page* happens only
+  when you press "fetch from source" on a recipe we hold no captured HTML for.
 
 ## 4. Scaling — one household-size setting
 
@@ -102,7 +124,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## Data model sketch
 
-- **Recipe** — name, source, stated servings, tags/favorite flag, ingredient lines.
+- **Recipe** — name, source, stated servings, tags/favorite flag, ingredient lines,
+  and an optional photo (bytes + MIME type, plus the URL it came from).
 - **Ingredient line** — name, quantity, unit (belongs to a Recipe).
 - **WeekPlan** — week identifier + up to 7 dinner slots, each referencing a Recipe with
   an optional per-slot servings override.
@@ -118,7 +141,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## Deferred (not in v1)
 
-- Automated scraping of source sites.
+- Automated scraping of source sites. (Recipe *photos* are the one narrow
+  exception — see §2b.)
 - Receipt OCR / line-item spend and item-level cost attribution.
 - Budget targets and over-budget alerts.
 - Individual user accounts / multi-tenant isolation.

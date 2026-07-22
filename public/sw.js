@@ -7,12 +7,15 @@
  *  - Pages and their RSC payloads: network-first. Online you always get fresh
  *    data; offline you fall back to the last copy cached while online (e.g. the
  *    shopping list you opened at home), and finally to /offline.html.
+ *  - Recipe photos (/api/recipes/<id>/image): cache-first. They're immutable
+ *    under a given URL (edits bust them with a ?v= stamp) and we want them on
+ *    the phone in the kitchen and the store.
  *  - Non-GET requests (Server Actions, /api writes) and auth endpoints are never
  *    intercepted — mutations require a live connection.
  *
  * Bump CACHE_VERSION to force old caches out on the next activate.
  */
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const SHELL_CACHE = `mealplanner-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `mealplanner-runtime-${CACHE_VERSION}`;
 
@@ -48,6 +51,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Recipe photos are the one API response worth holding on to: binary, stable
+// under its URL, and useless to re-fetch.
+function isRecipeImage(url) {
+  return /^\/api\/recipes\/[^/]+\/image$/.test(url.pathname);
+}
+
 function isHashedStatic(url) {
   return (
     url.pathname.startsWith("/_next/static/") ||
@@ -67,16 +76,22 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   // Auth flows should never be served stale from cache.
-  if (url.pathname === "/login" || url.pathname.startsWith("/api/")) return;
+  if (url.pathname === "/login") return;
+  if (url.pathname.startsWith("/api/") && !isRecipeImage(url)) return;
 
-  if (isHashedStatic(url)) {
+  if (isHashedStatic(url) || isRecipeImage(url)) {
     event.respondWith(
       caches.match(request).then(
         (cached) =>
           cached ||
           fetch(request).then((response) => {
-            const copy = response.clone();
-            caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
+            // Cache-first means a cached error is permanent, so only keep good
+            // responses. Opaque ones (status 0) are cross-origin images we
+            // followed a redirect to — legitimate, just unreadable to us.
+            if (response.ok || response.type === "opaque") {
+              const copy = response.clone();
+              caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
+            }
             return response;
           }),
       ),
