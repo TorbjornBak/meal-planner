@@ -10,6 +10,10 @@
 # That exposes the app on the tailnet only — no public exposure, no
 # port-forwarding, no cert management (§10).
 
+# Pinned so the named volume below is always `mealplanner_pgdata`, no matter
+# which directory compose is invoked from (dev checkout vs. /srv/mealplanner).
+name: mealplanner
+
 services:
   db:
     image: postgres:17-alpine
@@ -32,6 +36,10 @@ services:
       retries: 5
 
   app:
+    # CI sets APP_IMAGE to the freshly built, SHA-tagged image from the Forgejo
+    # registry. Locally it falls back to a build from this directory, so
+    # `docker compose up -d --build` still works unchanged.
+    image: ${APP_IMAGE:-mealplanner-app:local}
     build: .
     restart: unless-stopped
     depends_on:

@@ -1,0 +1,79 @@
+# Build the app image, push it to the Forgejo container registry, then restart
+# the running stack — all on the home server, since the runner lives there too.
+#
+# Requires a runner registered with the `self-hosted` label in *host* mode
+# (jobs run on the host shell, so `docker` talks to the host daemon directly).
+# See README "Deployment" for the one-time setup.
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  # Lets you redeploy the current main without an empty commit.
+  workflow_dispatch:
+
+env:
+  # e.g. forgejo.example.ts.net/torbjornbak/meal-planner
+  IMAGE: ${{ vars.REGISTRY_HOST }}/${{ github.repository }}
+  # Where docker-compose.yml and the production .env live on the server.
+  DEPLOY_DIR: /srv/mealplanner
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to the Forgejo container registry
+        run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" \
+            | docker login "${{ vars.REGISTRY_HOST }}" \
+                -u "${{ github.actor }}" --password-stdin
+
+      # Tag with the commit SHA (immutable, so rollback is a one-liner) and
+      # with `latest` (what compose pulls).
+      - name: Build image
+        run: |
+          docker build \
+            --tag "$IMAGE:${{ github.sha }}" \
+            --tag "$IMAGE:latest" \
+            --cache-from "$IMAGE:latest" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            .
+
+      - name: Push image
+        run: |
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      # The compose file is versioned here; the .env with real secrets is not,
+      # and stays put in DEPLOY_DIR across deploys.
+      - name: Sync compose file
+        run: install -m 644 docker-compose.yml "$DEPLOY_DIR/docker-compose.yml"
+
+      # Migrations run in the container's CMD (`prisma migrate deploy`), so
+      # `up -d` is the whole deploy.
+      - name: Restart the stack
+        working-directory: /srv/mealplanner
+        run: |
+          export APP_IMAGE="$IMAGE:${{ github.sha }}"
+          docker compose pull db
+          docker compose up -d --remove-orphans
+
+      - name: Wait for the app to come up
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/login; then
+              echo "App is responding."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "App did not respond within 60s — recent logs:"
+          cd "$DEPLOY_DIR" && docker compose logs --tail=50 app
+          exit 1
+
+      - name: Prune old images
+        if: always()
+        run: docker image prune -f --filter "until=168h"
