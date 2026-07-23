@@ -14,8 +14,11 @@ spend.
 - **Postgres + Prisma.**
 - **Docker Compose**: app + Postgres, served over **Tailscale** via `tailscale serve`.
 
-No external services: recipe parsing is a deterministic string parser (§1), so
-there's nothing to call out to and no API key to manage.
+No third-party APIs or keys: recipe parsing is a deterministic string parser
+(§1), not an LLM. The server does fetch directly from a recipe's *own* source
+site — the page, when you import by pasting a URL, and its photo — but that's a
+best-effort, user-initiated fetch guarded against private-network addresses, not
+a service you sign up for.
 
 ## Project layout
 
@@ -23,6 +26,10 @@ there's nothing to call out to and no API key to manage.
 prisma/schema.prisma      Data model (recipes, plans, lists, pantry, spend)
 src/lib/                  Core logic:
   parse.ts                  deterministic recipe parsing, no LLM (§1)
+  html.ts                   extract a recipe from page HTML (JSON-LD/microdata)
+  fetchPage.ts              guarded server-side fetch of a recipe page (§1)
+  importRecipe.ts           parse HTML + download photo → saved draft (§1, §2b)
+  image.ts                  download a recipe photo, private-network guarded (§2b)
   scaling.ts                recipe scaling to household size (§4)
   shopping.ts               merge + pantry aggregation (§5)
   keys.ts                   ingredient-name normalization for merge/diff/pantry
@@ -30,8 +37,8 @@ src/lib/                  Core logic:
   prisma.ts                 Prisma client singleton
 src/app/                  App Router pages (dashboard, plan, recipes,
                           shopping, spending, settings, login)
-src/app/api/             Route handlers (parse, recipes, plan, shopping,
-                          pantry, trips, settings, login)
+src/app/api/             Route handlers (parse, import, capture, recipes, plan,
+                          shopping, pantry, trips, settings, login)
 src/middleware.ts        Gates every route behind the shared session
 scripts/backup.sh        Nightly Borg backup to a Hetzner Storage Box (§11)
 ```
