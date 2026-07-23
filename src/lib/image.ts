@@ -1,15 +1,14 @@
 /**
  * Getting a recipe photo into the database.
  *
- * Recipes are captured from pages you're already reading, and those pages
- * advertise their photo in their metadata (see `extractRecipeImageUrl`). We
- * download that one image and store the bytes ourselves rather than hotlinking:
- * the app has to work offline over Tailscale (§10), and a hotlinked photo dies
- * the day the source site reorganizes.
+ * A recipe page advertises its photo in its metadata (see
+ * `extractRecipeImageUrl`). We download that one image and store the bytes
+ * ourselves rather than hotlinking: the app has to work offline over Tailscale
+ * (§10), and a hotlinked photo dies the day the source site reorganizes.
  *
- * This is the *only* place the server fetches anything from the open web, and
- * it fetches a single image by URL — not the recipe page. Recipe content still
- * arrives from your browser (§1, "no web scraping").
+ * `resolvePublicUrl` below is the shared private-network guard for every URL
+ * the server fetches — both the photo here and, for the paste-a-URL import
+ * (§1), the recipe page itself (see `fetchPage.ts`).
  */
 
 import { MAX_IMAGE_BYTES } from "./recipeImage";

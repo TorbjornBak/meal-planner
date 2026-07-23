@@ -16,15 +16,45 @@ interface ParsedRecipe {
   ingredients: ParsedIngredient[];
 }
 
-// Paste-and-parse with the MANDATORY review-and-edit step (§1). Flow:
-//   1. paste text → POST /api/parse → get structured draft
-//   2. eyeball & correct the parsed ingredients (bad parse = wrong list)
-//   3. save → POST /api/recipes
+// Add a recipe (§1). Two ways in, both ending in the MANDATORY review step:
+//   - Fast path: paste a URL → POST /api/import (server fetches + parses) →
+//     land on the edit page to review the saved draft.
+//   - Fallback: paste text → POST /api/parse → review inline → POST /api/recipes.
+// A bad parse means a wrong shopping list, so nothing skips the review.
 export default function NewRecipePage() {
   const router = useRouter();
   const [text, setText] = useState("");
   const [draft, setDraft] = useState<ParsedRecipe | null>(null);
   const [busy, setBusy] = useState(false);
+  const [url, setUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  // Fast path: paste a URL, let the server fetch and parse the page, then land
+  // on the edit page for the mandatory review-and-edit step. On failure (bot
+  // wall, JS-only, paywall) it tells you to use the bookmarklet, which always
+  // works because it's your real browser.
+  async function importUrl() {
+    setImporting(true);
+    setImportError(null);
+    try {
+      const res = await fetch("/api/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setImportError(data.error ?? "Import failed.");
+        return;
+      }
+      router.push(`/recipes/${data.id}/edit`);
+    } catch {
+      setImportError("Import failed — check the URL and try again.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function parse() {
     setBusy(true);
@@ -70,8 +100,32 @@ export default function NewRecipePage() {
       {!draft && (
         <div className="card">
           <p className="muted">
-            Copy the recipe text from anywhere and paste it below. No scraping —
-            you fetch it as a normal reader.
+            Paste a recipe page URL and we&apos;ll try to fetch it for you.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://…"
+              style={{ flex: 1, minWidth: 240 }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && url.trim() && !importing) importUrl();
+              }}
+            />
+            <button onClick={importUrl} disabled={importing || !url.trim()}>
+              {importing ? "Fetching…" : "Fetch from URL"}
+            </button>
+          </div>
+          {importError && (
+            <p className="muted" style={{ color: "var(--danger, #c00)", marginTop: 8 }}>
+              {importError}
+            </p>
+          )}
+
+          <p className="muted" style={{ marginTop: 16 }}>
+            Or copy the recipe text and paste it below — if a site blocks the
+            fetch above, this and the bookmarklet always work.
           </p>
           <textarea
             value={text}

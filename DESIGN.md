@@ -10,14 +10,23 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## 1. Getting recipes in — paste-and-parse
 
-- You copy recipe/plan text (from anotherdayofeating or anywhere) and paste it in.
-- A **deterministic parser** (plain string handling, no LLM) reads the text into
-  structured ingredients (name / quantity / unit) plus the recipe's stated
-  serving count. The source pages have a rigid structure — a servings line and an
-  ingredient block with one item per line — so no model is needed.
-- **No web scraping** — you fetch the content as a normal reader and paste it.
-- **A review-and-edit step is mandatory.** You eyeball and correct the parsed
-  ingredients before they count toward anything. Bad parse = wrong list.
+- A **deterministic parser** (plain string handling, no LLM) reads a recipe into
+  structured ingredients (name / quantity / unit) plus its stated serving count.
+  Recipe pages have a rigid structure — a servings line, an ingredient block with
+  one item per line, and usually embedded schema.org data — so no model is needed.
+- **Three ways in, all feeding the same parser and the same review step:**
+  - **Paste a URL** (the fast path) — the server fetches the page and parses it
+    for you. Best-effort: it works for most sites that publish schema.org recipe
+    data, which is the majority, but a site can refuse (bot walls, login, JS-only
+    rendering). See §2b for the guarded fetch.
+  - **Bookmarklet** — captures the page HTML from your own browser (where you're
+    a logged-in, non-bot reader) and sends it in. Always works, because it's your
+    real browser; it's the fallback when a URL fetch is blocked.
+  - **Paste text** — copy the recipe text from anywhere and paste it.
+- **A review-and-edit step is mandatory.** However a recipe came in, you eyeball
+  and correct the parsed ingredients before they count toward anything. Bad parse
+  = wrong list. URL and bookmarklet imports save a draft and drop you straight on
+  the edit page to do this.
 
 ## 2. Recipe library — full curation
 
@@ -50,10 +59,12 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Stored **as bytes in the database**, like receipt photos (§7) — not
   hotlinked. The app has to work offline over Tailscale (§10), and a hotlinked
   photo dies the day the source site reorganizes. Capped at 5 MB.
-- The **one** place the server reaches out to the open web. It fetches a single
-  image by URL, guarded against private-network addresses; recipe *content*
-  still comes from your browser (§1). Fetching the source *page* happens only
-  when you press "fetch from source" on a recipe we hold no captured HTML for.
+- The server reaches out to the open web in a few **guarded** spots: downloading
+  a recipe photo by URL, fetching the recipe *page* for the paste-a-URL import
+  (§1), and the "fetch from source" photo button for older recipes. All of them
+  go through the same private-network guard (`resolvePublicUrl`), so neither a
+  pasted URL nor a page-declared image URL can be used to probe the host's own
+  network. The bookmarklet path still sends content straight from your browser.
 
 ## 4. Scaling — one household-size setting
 
@@ -144,8 +155,10 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## Deferred (not in v1)
 
-- Automated scraping of source sites. (Recipe *photos* are the one narrow
-  exception — see §2b.)
+- Bulk or automated crawling of source sites — no crawler, no background jobs,
+  no re-fetching on a schedule. Single-page import of a URL *you* paste is
+  supported (§1); it's a best-effort fetch of one page you chose, with the
+  bookmarklet as the fallback when a site blocks it.
 - Receipt OCR / line-item spend and item-level cost attribution.
 - Budget targets and over-budget alerts.
 - Individual user accounts / multi-tenant isolation.
