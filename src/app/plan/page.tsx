@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
 
-// Weekly dinner plan (§3, §4), laid out as a calendar week. Assign a recipe to
-// any night; leave nights empty for leftovers / eating out. Optional per-night
-// servings override for guests or batch-cooking. Then generate the shopping
-// list (§5).
+// Weekly dinner plan (§3, §4), laid out as a calendar week. Assign one or more
+// recipes to any night; leave nights empty for leftovers / eating out. Optional
+// per-dinner servings override for guests or batch-cooking. Then generate the
+// shopping list (§5).
 //
 // You can page backwards and forwards through weeks: the plan API upserts
 // whichever week you ask for, so next week exists the moment you look at it.
@@ -30,8 +30,9 @@ interface SlotRecipe {
   imageUrl: string | null;
 }
 interface Slot {
+  id: string;
   dayOfWeek: number;
-  recipeId: string | null;
+  recipeId: string;
   servingsOverride: number | null;
   recipe: SlotRecipe | null;
 }
@@ -116,39 +117,49 @@ export default function PlanPage() {
     };
   }, [weekStart]);
 
-  const updateSlot = useCallback(
-    async (dayOfWeek: number, patch: Partial<Slot>) => {
+  // Add a dinner to a night. The server assigns its position (after any
+  // dinners already there) and returns the created slot, which we append.
+  const addDinner = useCallback(
+    async (dayOfWeek: number, recipeId: string) => {
       if (!plan) return;
-      const current = plan.slots.find((s) => s.dayOfWeek === dayOfWeek)!;
-      const next: Slot = {
-        ...current,
-        ...patch,
-        // Keep the embedded recipe in step with the id, so the cell re-renders
-        // with the new photo and title straight away.
-        recipe:
-          patch.recipeId === undefined
-            ? current.recipe
-            : recipes.find((r) => r.id === patch.recipeId) ?? null,
-      };
-
-      // Optimistic local update.
-      setPlan({
-        ...plan,
-        slots: plan.slots.map((s) => (s.dayOfWeek === dayOfWeek ? next : s)),
+      const res = await fetch("/api/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekPlanId: plan.id, dayOfWeek, recipeId }),
       });
+      const slot: Slot = await res.json();
+      setPlan((p) => (p ? { ...p, slots: [...p.slots, slot] } : p));
+    },
+    [plan],
+  );
 
+  const removeDinner = useCallback(async (slotId: string) => {
+    // Optimistic: drop it from the calendar straight away.
+    setPlan((p) =>
+      p ? { ...p, slots: p.slots.filter((s) => s.id !== slotId) } : p,
+    );
+    await fetch(`/api/plan?slotId=${slotId}`, { method: "DELETE" });
+  }, []);
+
+  const updateServings = useCallback(
+    async (slotId: string, servingsOverride: number | null) => {
+      setPlan((p) =>
+        p
+          ? {
+              ...p,
+              slots: p.slots.map((s) =>
+                s.id === slotId ? { ...s, servingsOverride } : s,
+              ),
+            }
+          : p,
+      );
       await fetch("/api/plan", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          weekPlanId: plan.id,
-          dayOfWeek,
-          recipeId: next.recipeId,
-          servingsOverride: next.servingsOverride,
-        }),
+        body: JSON.stringify({ slotId, servingsOverride }),
       });
     },
-    [plan, recipes],
+    [],
   );
 
   async function generate() {
@@ -166,7 +177,7 @@ export default function PlanPage() {
     }
   }
 
-  const anyRecipeAssigned = plan?.slots.some((s) => s.recipeId) ?? false;
+  const anyRecipeAssigned = (plan?.slots.length ?? 0) > 0;
 
   return (
     <div className="calendar-page">
@@ -213,9 +224,8 @@ export default function PlanPage() {
       <div className="calendar">
         {DAYS.map((dayName, dayOfWeek) => {
           const date = addDays(weekStart, dayOfWeek);
-          const slot = plan?.slots.find((s) => s.dayOfWeek === dayOfWeek);
-          const recipe = slot?.recipe ?? null;
-          const photo = recipe ? recipeImageSrc(recipe) : null;
+          const daySlots =
+            plan?.slots.filter((s) => s.dayOfWeek === dayOfWeek) ?? [];
 
           return (
             <div
@@ -230,62 +240,75 @@ export default function PlanPage() {
               <div className="day-body">
                 {!plan ? (
                   <p className="muted day-empty">…</p>
-                ) : recipe ? (
-                  <>
-                    <Link
-                      href={`/recipes/${recipe.id}`}
-                      className="day-photo"
-                      tabIndex={-1}
-                      aria-hidden
-                    >
-                      {photo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={photo} alt="" loading="lazy" />
-                      ) : (
-                        <span className="recipe-thumb-empty">🍽</span>
-                      )}
-                    </Link>
-                    <Link href={`/recipes/${recipe.id}`} className="day-title">
-                      {recipe.name}
-                    </Link>
-                    <label className="muted day-serves">
-                      serves{" "}
-                      <input
-                        type="number"
-                        min={1}
-                        placeholder="household"
-                        value={slot?.servingsOverride ?? ""}
-                        onChange={(e) =>
-                          updateSlot(dayOfWeek, {
-                            servingsOverride: e.target.value
-                              ? Number(e.target.value)
-                              : null,
-                          })
-                        }
-                      />
-                    </label>
-                  </>
-                ) : (
+                ) : daySlots.length === 0 ? (
                   <p className="muted day-empty">Leftovers / eating out</p>
+                ) : (
+                  daySlots.map((slot) => {
+                    const recipe = slot.recipe;
+                    const photo = recipe ? recipeImageSrc(recipe) : null;
+                    return (
+                      <div className="dinner" key={slot.id}>
+                        <Link
+                          href={`/recipes/${slot.recipeId}`}
+                          className="day-photo"
+                          tabIndex={-1}
+                          aria-hidden
+                        >
+                          {photo ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={photo} alt="" loading="lazy" />
+                          ) : (
+                            <span className="recipe-thumb-empty">🍽</span>
+                          )}
+                        </Link>
+                        <button
+                          className="dinner-remove"
+                          onClick={() => removeDinner(slot.id)}
+                          aria-label={`Remove ${recipe?.name ?? "dinner"}`}
+                        >
+                          ×
+                        </button>
+                        <Link
+                          href={`/recipes/${slot.recipeId}`}
+                          className="day-title"
+                        >
+                          {recipe?.name}
+                        </Link>
+                        <label className="muted day-serves">
+                          serves{" "}
+                          <input
+                            type="number"
+                            min={1}
+                            placeholder="household"
+                            value={slot.servingsOverride ?? ""}
+                            onChange={(e) =>
+                              updateServings(
+                                slot.id,
+                                e.target.value ? Number(e.target.value) : null,
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    );
+                  })
                 )}
               </div>
 
               {plan && (
                 <select
                   className="day-picker"
-                  value={slot?.recipeId ?? ""}
-                  onChange={(e) =>
-                    updateSlot(dayOfWeek, {
-                      recipeId: e.target.value || null,
-                      // Clearing the night also clears its override.
-                      servingsOverride: e.target.value
-                        ? slot?.servingsOverride ?? null
-                        : null,
-                    })
-                  }
-                  aria-label={`Dinner for ${dayName}`}
+                  // A pure "add" control: it never reflects a selection, so it
+                  // resets to the prompt after each pick.
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) addDinner(dayOfWeek, e.target.value);
+                  }}
+                  aria-label={`Add dinner for ${dayName}`}
                 >
-                  <option value="">{recipe ? "— clear —" : "+ Add dinner"}</option>
+                  <option value="">
+                    {daySlots.length ? "+ Add another" : "+ Add dinner"}
+                  </option>
                   {recipes.map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.name}

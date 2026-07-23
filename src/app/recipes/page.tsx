@@ -42,8 +42,9 @@ interface Recipe {
   ingredients: Ingredient[];
 }
 interface Slot {
+  id: string;
   dayOfWeek: number;
-  recipeId: string | null;
+  recipeId: string;
 }
 interface WeekPlan {
   id: string;
@@ -114,22 +115,23 @@ export default function RecipesPage() {
     else await loadRecipes();
   }
 
+  // Default the picker to the first night with no dinner yet, falling back to
+  // Monday once the week is full — you can still stack a second dinner there.
   function nextEmptyDay(): number {
-    const empty = plan?.slots.find((s) => s.recipeId == null);
-    return empty ? empty.dayOfWeek : 0;
+    const used = new Set(plan?.slots.map((s) => s.dayOfWeek));
+    for (let d = 0; d < 7; d++) if (!used.has(d)) return d;
+    return 0;
   }
   async function addToPlan(recipeId: string, dayOfWeek: number) {
     if (!plan) return;
-    setPlan({
-      ...plan,
-      slots: plan.slots.map((s) => (s.dayOfWeek === dayOfWeek ? { ...s, recipeId } : s)),
-    });
     setAdded((a) => ({ ...a, [recipeId]: `Added to ${DAYS[dayOfWeek]} ✓` }));
-    await fetch("/api/plan", {
-      method: "PATCH",
+    const res = await fetch("/api/plan", {
+      method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ weekPlanId: plan.id, dayOfWeek, recipeId, servingsOverride: null }),
+      body: JSON.stringify({ weekPlanId: plan.id, dayOfWeek, recipeId }),
     });
+    const slot: Slot = await res.json();
+    setPlan((p) => (p ? { ...p, slots: [...p.slots, slot] } : p));
   }
 
   if (!recipes) return <p className="muted">Loading…</p>;

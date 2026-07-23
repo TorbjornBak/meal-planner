@@ -28,8 +28,10 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## 3. Meal plan — dinners only, as a calendar week
 
-- 7 dinner slots per week, laid out as a **calendar week** — one card per night,
-  Monday to Sunday, with the date and today highlighted.
+- A **calendar week** — one card per night, Monday to Sunday, with the date and
+  today highlighted.
+- Each night holds **any number of dinners** — add a second dish for a big
+  night, or stack sides — each with its own photo and servings override.
 - Nights can be left empty (leftovers / eating out).
 - **Page back and forward through weeks.** Asking for a week creates it, so next
   week's plan exists the moment you look at it.
@@ -127,8 +129,9 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - **Recipe** — name, source, stated servings, tags/favorite flag, ingredient lines,
   and an optional photo (bytes + MIME type, plus the URL it came from).
 - **Ingredient line** — name, quantity, unit (belongs to a Recipe).
-- **WeekPlan** — week identifier + up to 7 dinner slots, each referencing a Recipe with
-  an optional per-slot servings override.
+- **WeekPlan** — week identifier + its dinner slots. Each slot pins a Recipe to a night
+  (with an optional per-slot servings override and an ordering position); a night may
+  hold several slots or none.
 - **ShoppingList** — a persistent entity derived from a WeekPlan. Keyed by ingredient
   identity so it can be **diffed** against plan changes: surviving items keep their
   checked state, new ingredients arrive unchecked, removed ones drop off. Tracks

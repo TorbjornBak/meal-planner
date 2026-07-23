@@ -257,6 +257,39 @@ table {
   gap: 0.35rem;
   min-width: 0;
 }
+/* One dinner within a night. Several can stack, divided by a hairline rule. */
+.dinner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.dinner + .dinner {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Sits in the photo's top-right corner; tinted disc so it reads on any image. */
+.dinner-remove {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 1.15rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .day-photo {
   display: flex;
   align-items: center;

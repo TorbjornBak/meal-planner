@@ -67,7 +67,8 @@ model IngredientLine {
 // Weekly dinner plan (§3, §4)
 // -----------------------------------------------------------------------------
 
-/// A single week of dinners. Nights may be empty (leftovers / eating out).
+/// A single week of dinners. A night may hold several dinners or none at all
+/// (leftovers / eating out).
 model WeekPlan {
   id           String        @id @default(cuid())
   /// The Monday of the week (date-only), unique per household.
@@ -78,19 +79,23 @@ model WeekPlan {
   updatedAt    DateTime      @updatedAt
 }
 
-/// One of up to 7 dinner slots in a week. A null recipe = empty night.
+/// One dinner assigned to a night. A night can hold several (§3); an empty
+/// night simply has no slots. Removing a recipe from the library removes it
+/// from every night it was on (cascade).
 model DinnerSlot {
   id         String   @id @default(cuid())
   weekPlanId String
   weekPlan   WeekPlan @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
   /// 0 = Monday … 6 = Sunday.
   dayOfWeek  Int
-  recipeId   String?
-  recipe     Recipe?  @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+  recipeId   String
+  recipe     Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
   /// Per-dinner override of household size for guests / batch-cooking (§4).
   servingsOverride Int?
+  /// Orders the dinners within a single night.
+  position   Int      @default(0)
 
-  @@unique([weekPlanId, dayOfWeek])
+  @@index([weekPlanId, dayOfWeek])
   @@index([recipeId])
 }
 

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 
-// Weekly dinner plan (§3, §4).
+// Weekly dinner plan (§3, §4). A night can hold several dinners; an empty night
+// simply has no slots.
 
 /** Monday (UTC, date-only) of the week containing `d`. */
 function mondayOf(d: Date): Date {
@@ -16,7 +17,7 @@ function mondayOf(d: Date): Date {
 }
 
 // GET /api/plan?weekStart=YYYY-MM-DD — fetch (or create) a week's plan with its
-// 7 dinner slots. Defaults to the current week.
+// dinner slots, ordered by day then position. Defaults to the current week.
 export async function GET(req: Request) {
   const raw = new URL(req.url).searchParams.get("weekStart");
   const weekStart = mondayOf(raw ? new Date(raw) : new Date());
@@ -24,13 +25,10 @@ export async function GET(req: Request) {
   const plan = await prisma.weekPlan.upsert({
     where: { weekStart },
     update: {},
-    create: {
-      weekStart,
-      slots: { create: Array.from({ length: 7 }, (_, dayOfWeek) => ({ dayOfWeek })) },
-    },
+    create: { weekStart },
     include: {
       slots: {
-        orderBy: { dayOfWeek: "asc" },
+        orderBy: [{ dayOfWeek: "asc" }, { position: "asc" }],
         include: { recipe: { omit: OMIT_RECIPE_BLOBS } },
       },
     },
@@ -39,27 +37,60 @@ export async function GET(req: Request) {
   return NextResponse.json(plan);
 }
 
-const SlotInput = z.object({
+const AddInput = z.object({
   weekPlanId: z.string().min(1),
   dayOfWeek: z.number().int().min(0).max(6),
-  recipeId: z.string().nullable(),
-  servingsOverride: z.number().int().positive().nullable().optional(),
+  recipeId: z.string().min(1),
 });
 
-// PATCH /api/plan — assign (or clear) a recipe on a dinner slot, with an
-// optional per-slot servings override (§4).
-export async function PATCH(req: Request) {
-  const parsed = SlotInput.safeParse(await req.json());
+// POST /api/plan — add a dinner to a night. The new dinner lands after any
+// dinners already on that night.
+export async function POST(req: Request) {
+  const parsed = AddInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { weekPlanId, dayOfWeek, recipeId, servingsOverride } = parsed.data;
+  const { weekPlanId, dayOfWeek, recipeId } = parsed.data;
+
+  const position = await prisma.dinnerSlot.count({
+    where: { weekPlanId, dayOfWeek },
+  });
+  const slot = await prisma.dinnerSlot.create({
+    data: { weekPlanId, dayOfWeek, recipeId, position },
+    include: { recipe: { omit: OMIT_RECIPE_BLOBS } },
+  });
+
+  return NextResponse.json(slot, { status: 201 });
+}
+
+const PatchInput = z.object({
+  slotId: z.string().min(1),
+  servingsOverride: z.number().int().positive().nullable(),
+});
+
+// PATCH /api/plan — set (or clear) a dinner's per-slot servings override (§4).
+export async function PATCH(req: Request) {
+  const parsed = PatchInput.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+  const { slotId, servingsOverride } = parsed.data;
 
   const slot = await prisma.dinnerSlot.update({
-    where: { weekPlanId_dayOfWeek: { weekPlanId, dayOfWeek } },
-    data: { recipeId, servingsOverride: servingsOverride ?? null },
+    where: { id: slotId },
+    data: { servingsOverride },
     include: { recipe: { omit: OMIT_RECIPE_BLOBS } },
   });
 
   return NextResponse.json(slot);
+}
+
+// DELETE /api/plan?slotId=... — remove a dinner from its night.
+export async function DELETE(req: Request) {
+  const slotId = new URL(req.url).searchParams.get("slotId");
+  if (!slotId) {
+    return NextResponse.json({ error: "slotId required" }, { status: 400 });
+  }
+  await prisma.dinnerSlot.delete({ where: { id: slotId } });
+  return NextResponse.json({ ok: true });
 }
