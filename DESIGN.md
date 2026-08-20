@@ -34,6 +34,15 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - You can **browse, search, reuse** a past recipe in a new week, **tag favorites,
   rename, and delete**.
 - The library is a first-class asset, not dead storage.
+- **Cooking mode** on a recipe holds the screen awake (Screen Wake Lock) while
+  you cook, so the phone doesn't black out with wet hands. It's a toggle, off by
+  default, and it's remembered between recipes.
+- **Timers come out of the method text.** Every cook time in a step ("20-25
+  minutter", "1 hour and 30 minutes", Danish or English) is a tap-to-start
+  countdown, and a manual timer covers the steps that don't say. Several run at
+  once, the alarm is a synthesised beep plus a vibration, and — like everything
+  else — the reading is a deterministic parse, no LLM (§1, §12). Timers live in
+  the open page only; nothing runs in the background.
 
 ## 3. Meal plan — dinners only, as a calendar week
 

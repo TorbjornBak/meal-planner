@@ -32,6 +32,7 @@ src/lib/                  Core logic:
   fetchPage.ts              guarded server-side fetch of a recipe page (§1)
   importRecipe.ts           parse HTML + download photo → saved draft (§1, §2b)
   image.ts                  download a recipe photo, private-network guarded (§2b)
+  durations.ts              cook times out of a step, for the timers (§2)
   scaling.ts                recipe scaling to household size (§4)
   shopping.ts               merge + pantry aggregation (§5)
   keys.ts                   ingredient-name normalization for merge/diff/pantry
