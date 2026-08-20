@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { MailDiagnosis, type Diagnosis } from "./MailDiagnosis";
 
 /**
  * Your own account (§9) — name, email, password, and the weekly digest
@@ -31,6 +32,8 @@ export function AccountCard() {
   const [pwNote, setPwNote] = useState<string | null>(null);
 
   const [previewing, setPreviewing] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [mailCheck, setMailCheck] = useState<(Diagnosis & { ok?: boolean }) | null>(null);
 
   useEffect(() => {
     fetch("/api/account")
@@ -108,16 +111,33 @@ export function AccountCard() {
       const res = await fetch("/api/newsletter/preview", { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(
-          body.error === "mail-not-configured"
-            ? "No mail server is configured on this instance."
-            : "Couldn't send it — check the SMTP settings and the server log.",
-        );
+        if (body.error === "send-failed") {
+          setMailCheck({ summary: body.summary, hint: body.hint, detail: body.detail });
+          return;
+        }
+        setError("No mail server is configured on this instance.");
         return;
       }
       setNote(`Sent to ${body.to}.`);
     } finally {
       setPreviewing(false);
+    }
+  }
+
+  async function testMail() {
+    setTesting(true);
+    setMailCheck(null);
+    try {
+      const res = await fetch("/api/mail/test", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      setMailCheck({
+        ok: body.ok,
+        summary: body.summary,
+        hint: body.ok ? undefined : body.hint,
+        detail: body.ok ? undefined : body.detail,
+      });
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -221,6 +241,11 @@ export function AccountCard() {
           <p style={{ marginTop: 12 }}>
             <button onClick={sendPreview} disabled={previewing}>
               {previewing ? "Sending…" : "Send me one now"}
+            </button>{" "}
+            {/* Connects and authenticates without sending, so a failure here
+                separates "can't reach the server" from "message refused". */}
+            <button className="muted" onClick={testMail} disabled={testing}>
+              {testing ? "Checking…" : "Test connection"}
             </button>
           </p>
         ) : (
@@ -229,6 +254,8 @@ export function AccountCard() {
             <code>SMTP_HOST</code>, <code>MAIL_FROM</code> and <code>APP_URL</code> to enable it.
           </p>
         )}
+
+        {mailCheck && <MailDiagnosis d={mailCheck} ok={mailCheck.ok} />}
       </div>
     </>
   );

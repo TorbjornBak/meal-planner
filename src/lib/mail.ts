@@ -14,6 +14,11 @@
  *   SMTP_PASS      password, if the server wants auth     (optional)
  *   MAIL_FROM      From: header, e.g. "MealPlanner <mealplanner@example.com>"
  *   APP_URL        public base URL used for links in mail (required)
+ *   SMTP_TLS_REJECT_UNAUTHORIZED
+ *                  "false" to accept a self-signed certificate (optional)
+ *
+ * Note for a mail server running on the *host*: SMTP_HOST=localhost resolves to
+ * the app container, not the box. Use the host's address instead.
  */
 
 import nodemailer, { type Transporter } from "nodemailer";
@@ -76,6 +81,13 @@ function transport(): Transporter {
     // Implicit TLS on 465; everything else negotiates STARTTLS.
     secure: process.env.SMTP_SECURE === "true" || port === 465,
     auth: user ? { user, pass } : undefined,
+    tls: {
+      // Certificates are verified by default. A self-hosted mail server with a
+      // self-signed certificate is the one case where that has to be relaxed —
+      // opt in explicitly, and only for a server you control on a network you
+      // trust (§10).
+      rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== "false",
+    },
     // The weekly digest opens one connection and sends every member's copy
     // down it rather than reconnecting per recipient.
     pool: true,

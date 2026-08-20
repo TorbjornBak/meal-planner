@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MailDiagnosis, type Diagnosis } from "./MailDiagnosis";
 
 /**
  * The household roster (§9).
@@ -26,6 +27,7 @@ export function HouseholdCard() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [busy, setBusy] = useState(false);
 
   function load() {
@@ -41,6 +43,7 @@ export function HouseholdCard() {
     e.preventDefault();
     setError(null);
     setNote(null);
+    setDiagnosis(null);
     setBusy(true);
     try {
       const res = await fetch("/api/users", {
@@ -50,6 +53,12 @@ export function HouseholdCard() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (body.error === "mail-failed") {
+          // The server worked out why; show that rather than "check the SMTP
+          // settings", which is only ever true and never useful.
+          setDiagnosis({ summary: body.summary, hint: body.hint, detail: body.detail });
+          return;
+        }
         setError(
           body.error === "already-a-member"
             ? "They're already in the household."
@@ -57,9 +66,7 @@ export function HouseholdCard() {
               ? "That doesn't look like an email address."
               : body.error === "mail-not-configured"
                 ? "No mail server is configured, so the invitation can't be sent."
-                : body.error === "mail-failed"
-                  ? "The invitation couldn't be delivered — check the SMTP settings."
-                  : "Couldn't send that invitation.",
+                : "Couldn't send that invitation.",
         );
         return;
       }
@@ -167,6 +174,7 @@ export function HouseholdCard() {
 
       {note && <p className="muted">{note}</p>}
       {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
+      {diagnosis && <MailDiagnosis d={diagnosis} />}
 
       <p className="muted" style={{ fontSize: "0.85em", marginTop: 8 }}>
         An invitation emails them a link to pick a password. It lasts seven days; inviting the

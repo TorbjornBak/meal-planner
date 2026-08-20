@@ -5,6 +5,7 @@ import { currentUser } from "@/lib/currentUser";
 import { INVITE_TTL_MS, issueAuthToken, looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { isMailConfigured, sendMail } from "@/lib/mail";
 import { inviteEmail } from "@/lib/emails";
+import { describeMailError } from "@/lib/mailError";
 
 /**
  * Household members (§9).
@@ -100,9 +101,10 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("invite mail failed", err);
     // The invitee can't act on a mail that never arrived, so unlike the
-    // forgot-password route this one admits the failure — the sender is a
-    // household member who can fix the SMTP settings.
-    return NextResponse.json({ error: "mail-failed" }, { status: 502 });
+    // forgot-password route this one admits the failure — and says what went
+    // wrong, because the person reading it is the one who can fix the setting.
+    const diagnosis = describeMailError(err, process.env.SMTP_HOST);
+    return NextResponse.json({ error: "mail-failed", ...diagnosis }, { status: 502 });
   }
 
   return NextResponse.json({
