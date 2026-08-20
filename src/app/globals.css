@@ -179,6 +179,123 @@ table {
   opacity: 0.35;
 }
 
+/* --- Cooking mode (recipe page) -------------------------------------------- */
+
+.cooking-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+/* Pressed reads as lit: the accent border is the "the screen is being held" cue. */
+.cooking-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* --- Cook timers (recipe page) --------------------------------------------- */
+
+.method-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.method-head h2 {
+  margin: 0;
+}
+.timer-add {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.timer-add input {
+  width: 4.5rem;
+}
+
+/*
+ * A cook time inside a step. It has to read as part of the sentence and still
+ * invite a tap, so: underlined text, not a control — but a 44px-tall target.
+ */
+.time-chip {
+  font: inherit;
+  min-height: 0;
+  padding: 0.1rem 0.3rem;
+  margin: -0.1rem 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.time-chip:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  text-decoration-style: solid;
+}
+
+/*
+ * The running timers, pinned to the bottom of the screen while you scroll the
+ * method above them. Sticky rather than fixed, so the last step is never stuck
+ * underneath the dock.
+ */
+.timer-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  padding-bottom: calc(0.6rem + env(safe-area-inset-bottom));
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 -2px 12px rgb(0 0 0 / 8%);
+}
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1 1 14rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.timer-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.timer-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.timer-label {
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Finished: loud enough to catch from across the kitchen. */
+.timer-done {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+}
+.timer-done .timer-clock {
+  color: var(--accent);
+}
+
 /* --- Weekly calendar (plan page) ------------------------------------------- */
 
 /*

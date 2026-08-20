@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS, recipeImageSrc } from "@/lib/recipeImage";
+import { CookingMode } from "./CookingMode";
+import { Method } from "./Method";
 
 // Recipe cooking view (§2) — ingredients + method, rendered for use at the
 // stove, with a link back to the original source if we have one.
@@ -90,6 +92,8 @@ export default async function RecipeDetailPage({
         ) : null}
       </p>
 
+      <CookingMode />
+
       <div className="card">
         <h2>Ingredients</h2>
         <ul>
@@ -101,9 +105,9 @@ export default async function RecipeDetailPage({
         </ul>
       </div>
 
-      <div className="card">
-        <h2>Method</h2>
-        {sections.length === 0 ? (
+      {sections.length === 0 ? (
+        <div className="card">
+          <h2>Method</h2>
           <p className="muted">
             No instructions saved.{" "}
             {recipe.source ? (
@@ -112,21 +116,11 @@ export default async function RecipeDetailPage({
               </a>
             ) : null}
           </p>
-        ) : (
-          sections.map((sec, i) => (
-            <div key={i} style={{ marginBottom: 12 }}>
-              {sec.header && <h3 style={{ marginBottom: 4 }}>{sec.header}</h3>}
-              <ol style={{ marginTop: 4 }}>
-                {sec.steps.map((step, j) => (
-                  <li key={j} style={{ marginBottom: 4 }}>
-                    {step}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ))
-        )}
-      </div>
+        </div>
+      ) : (
+        // Client-side from here down: the steps carry tappable timers (§2).
+        <Method sections={sections} />
+      )}
     </>
   );
 }
