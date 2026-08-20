@@ -15,10 +15,12 @@ spend.
 - **Docker Compose**: app + Postgres, served over **Tailscale** via `tailscale serve`.
 
 No third-party APIs or keys: recipe parsing is a deterministic string parser
-(§1), not an LLM. The server does fetch directly from a recipe's *own* source
-site — the page, when you import by pasting a URL, and its photo — but that's a
-best-effort, user-initiated fetch guarded against private-network addresses, not
-a service you sign up for.
+(§1), not an LLM, and receipt OCR is Tesseract compiled to WebAssembly, running
+in-process against a language model vendored in `tessdata/` (§7) — a library, not
+a service. The server does fetch directly from a recipe's *own* source site — the
+page, when you import by pasting a URL, and its photo — but that's a best-effort,
+user-initiated fetch guarded against private-network addresses, not a service you
+sign up for.
 
 ## Project layout
 
@@ -33,13 +35,17 @@ src/lib/                  Core logic:
   scaling.ts                recipe scaling to household size (§4)
   shopping.ts               merge + pantry aggregation (§5)
   keys.ts                   ingredient-name normalization for merge/diff/pantry
+  ocr.ts                    receipt photo → text, local Tesseract (§7)
+  receiptTotal.ts           pick the total out of OCR'd receipt text (§7)
+  spending.ts               weekly spend aggregation (§8)
   auth.ts                   shared-password session (§9)
   prisma.ts                 Prisma client singleton
 src/app/                  App Router pages (dashboard, plan, recipes,
                           shopping, spending, settings, login)
 src/app/api/             Route handlers (parse, import, capture, recipes, plan,
-                          shopping, pantry, trips, settings, login)
+                          shopping, pantry, trips, receipts/ocr, settings, login)
 src/middleware.ts        Gates every route behind the shared session
+tessdata/                Vendored Tesseract language model for receipt OCR (§7)
 scripts/backup.sh        Nightly Borg backup to a Hetzner Storage Box (§11)
 ```
 
@@ -53,6 +59,9 @@ scripts/backup.sh        Nightly Borg backup to a Hetzner Storage Box (§11)
 4. Apply the schema: `npm run prisma:migrate` (creates the initial migration).
 5. (Optional) seed staples: `npx tsx prisma/seed.ts`.
 6. Run: `npm run dev` → http://localhost:3000.
+
+`npm test` runs the unit tests (Node's built-in runner, no framework — it reads
+the TypeScript directly).
 
 ## Production (home box via Tailscale)
 

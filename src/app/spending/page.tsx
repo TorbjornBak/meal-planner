@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// Spending ledger + trend (§7, §8). Log a trip (date, store, typed total,
-// receipt photo) and see this-week / this-month sums. The weekly bar chart +
-// rolling average (§8) is a later refinement.
+// Spending ledger + trend (§7, §8). Log a trip (date, store, total, receipt
+// photo) and see this-week / this-month sums. Attaching a photo offers to read
+// the total off it (§7) — a suggestion, always overtypable. The weekly bar
+// chart + rolling average (§8) is a later refinement.
 
 interface Trip {
   id: string;
@@ -14,8 +15,134 @@ interface Trip {
   receipt: { id: string } | null;
 }
 
+interface OcrResult {
+  total: number | null;
+  line: string | null;
+  basis: "keyword" | "largest" | null;
+  confidence: number;
+}
+
 function money(n: number): string {
   return `${n.toFixed(2)} kr`;
+}
+
+/** Below this, Tesseract was mostly guessing at the page. */
+const SHAKY_CONFIDENCE = 55;
+
+/**
+ * The receipt-photo field, with the OCR suggestion attached to it (§7).
+ *
+ * Picking a photo reads it straight away; "Read total" re-reads on demand —
+ * the photo just picked, or the one already stored against this trip. Either
+ * way the answer goes to `onSuggest` and the human keeps the last word:
+ * `force` marks the reads they asked for explicitly, which are allowed to
+ * replace a total already in the box.
+ */
+function ReceiptPhotoField({
+  label,
+  tripId,
+  hasStoredReceipt,
+  onSuggest,
+}: {
+  label: string;
+  tripId?: string;
+  hasStoredReceipt?: boolean;
+  onSuggest: (total: number, force: boolean) => void;
+}) {
+  const [reading, setReading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [picked, setPicked] = useState<File | null>(null);
+
+  async function read(file: File | null, force: boolean) {
+    const body = new FormData();
+    if (file) body.set("photo", file);
+    else if (tripId) body.set("tripId", tripId);
+    else return;
+
+    setReading(true);
+    setStatus("Reading the receipt…");
+    try {
+      const res = await fetch("/api/receipts/ocr", { method: "POST", body });
+      if (!res.ok) throw new Error(String(res.status));
+      const ocr: OcrResult = await res.json();
+      setStatus(describe(ocr));
+      if (ocr.total !== null) onSuggest(ocr.total, force);
+    } catch {
+      setStatus("Couldn't read that photo — type the total in.");
+    } finally {
+      setReading(false);
+    }
+  }
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setPicked(file);
+    setStatus(null);
+    if (file) read(file, false);
+  }
+
+  // Nothing to read until there's a photo — a new one just picked, or the one
+  // already stored against this trip.
+  const canRead = Boolean(picked) || Boolean(tripId && hasStoredReceipt);
+
+  return (
+    <div>
+      <label>
+        {label}
+        <br />
+        <input type="file" name="photo" accept="image/*" onChange={onPick} />
+      </label>
+      {canRead && (
+        <>
+          {" "}
+          <button
+            type="button"
+            className="muted"
+            onClick={() => read(picked, true)}
+            disabled={reading}
+          >
+            Read total
+          </button>
+        </>
+      )}
+      {status && (
+        <div className="muted" style={{ fontSize: "0.85em", maxWidth: 340 }}>
+          {status}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What to tell the human about a read, honestly enough to be worth reading. */
+function describe(ocr: OcrResult): string {
+  if (ocr.total === null) return "No total found on that photo — type it in.";
+  if (ocr.basis === "largest") {
+    return `Read ${money(ocr.total)} — no total line was legible, so that's just the largest amount on the receipt. Worth a check.`;
+  }
+  if (ocr.confidence < SHAKY_CONFIDENCE) {
+    return `Read ${money(ocr.total)} from “${ocr.line}”, but the photo is hard going. Worth a check.`;
+  }
+  return `Read ${money(ocr.total)} from “${ocr.line}”. Check it.`;
+}
+
+/**
+ * Put an OCR suggestion into a form's total box. A total the human typed is
+ * left alone unless they explicitly asked for the re-read; a suggestion we put
+ * there ourselves is fair game to replace.
+ */
+function suggestTotal(
+  form: HTMLFormElement | null,
+  suggested: React.RefObject<string | null>,
+  total: number,
+  force: boolean,
+) {
+  const input = form?.elements.namedItem("total");
+  if (!(input instanceof HTMLInputElement)) return;
+  const typedByHand = input.value.trim() && input.value !== suggested.current;
+  if (typedByHand && !force) return;
+  input.value = String(total);
+  suggested.current = input.value;
 }
 
 /** Monday 00:00 (local) of the current week. */
@@ -36,6 +163,11 @@ export default function SpendingPage() {
   const [zoomed, setZoomed] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const editFormRef = useRef<HTMLFormElement>(null);
+  // The last total OCR put in each form, so we can tell our own suggestion
+  // apart from a figure the human typed.
+  const suggestedNew = useRef<string | null>(null);
+  const suggestedEdit = useRef<string | null>(null);
 
   // Esc minimizes the expanded receipt.
   useEffect(() => {
@@ -62,6 +194,7 @@ export default function SpendingPage() {
       });
       if (res.ok) {
         formRef.current?.reset();
+        suggestedNew.current = null;
         await load();
       }
     } finally {
@@ -80,6 +213,7 @@ export default function SpendingPage() {
       });
       if (res.ok) {
         setEditingId(null);
+        suggestedEdit.current = null;
         await load();
       }
     } finally {
@@ -131,11 +265,12 @@ export default function SpendingPage() {
               <br />
               <input type="number" name="total" step="0.01" min="0" required style={{ width: 110 }} />
             </label>
-            <label>
-              Receipt photo
-              <br />
-              <input type="file" name="photo" accept="image/*" />
-            </label>
+            <ReceiptPhotoField
+              label="Receipt photo"
+              onSuggest={(total, force) =>
+                suggestTotal(formRef.current, suggestedNew, total, force)
+              }
+            />
             <button type="submit" disabled={busy}>
               {busy ? "Saving…" : "Log trip"}
             </button>
@@ -172,6 +307,7 @@ export default function SpendingPage() {
                   <tr key={t.id} style={{ borderTop: "1px solid var(--border)" }}>
                     <td colSpan={5} style={{ padding: "8px" }}>
                       <form
+                        ref={editFormRef}
                         onSubmit={saveEdit}
                         style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}
                       >
@@ -198,11 +334,14 @@ export default function SpendingPage() {
                             style={{ width: 110 }}
                           />
                         </label>
-                        <label>
-                          {t.receipt ? "Replace receipt" : "Receipt photo"}
-                          <br />
-                          <input type="file" name="photo" accept="image/*" />
-                        </label>
+                        <ReceiptPhotoField
+                          label={t.receipt ? "Replace receipt" : "Receipt photo"}
+                          tripId={t.id}
+                          hasStoredReceipt={Boolean(t.receipt)}
+                          onSuggest={(total, force) =>
+                            suggestTotal(editFormRef.current, suggestedEdit, total, force)
+                          }
+                        />
                         {t.receipt && (
                           <label style={{ fontSize: "0.9em" }}>
                             <input type="checkbox" name="removePhoto" value="1" /> Remove photo
@@ -211,7 +350,14 @@ export default function SpendingPage() {
                         <button type="submit" disabled={busy}>
                           {busy ? "Saving…" : "Save"}
                         </button>
-                        <button type="button" className="muted" onClick={() => setEditingId(null)}>
+                        <button
+                          type="button"
+                          className="muted"
+                          onClick={() => {
+                            setEditingId(null);
+                            suggestedEdit.current = null;
+                          }}
+                        >
                           Cancel
                         </button>
                       </form>
@@ -243,7 +389,13 @@ export default function SpendingPage() {
                       )}
                     </td>
                     <td style={{ padding: "6px 8px", whiteSpace: "nowrap", textAlign: "right" }}>
-                      <button className="muted" onClick={() => setEditingId(t.id)}>
+                      <button
+                        className="muted"
+                        onClick={() => {
+                          setEditingId(t.id);
+                          suggestedEdit.current = null;
+                        }}
+                      >
                         Edit
                       </button>{" "}
                       <button className="muted" onClick={() => remove(t)}>

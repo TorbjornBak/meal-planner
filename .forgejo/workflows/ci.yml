@@ -1,4 +1,5 @@
-# Fast feedback on every push and pull request: types must check out.
+# Fast feedback on every push and pull request: types must check out and the
+# unit tests must pass.
 # The heavier `next build` is covered by the image build in deploy.yml.
 name: CI
 
@@ -25,3 +26,6 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Test
+        run: npm test

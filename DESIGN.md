@@ -93,9 +93,20 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## 7. Spending capture — per-receipt total + photo
 
-- Each shopping trip records: **date, store, total (typed in), and a receipt photo**
-  stored in the database.
-- No OCR, no line items.
+- Each shopping trip records: **date, store, total, and a receipt photo** stored
+  in the database.
+- **The total is read off the photo.** OCR runs on our own box — Tesseract
+  compiled to WebAssembly, with the Danish language model vendored in
+  `tessdata/` — so there is no service, no key, and nothing fetched at runtime.
+  Attaching a photo fills the total in.
+- It is a **suggestion, not an authority.** The amount lands in the total box
+  for a human to confirm or overtype, next to the receipt line it was read
+  from. Nothing reaches the ledger unread.
+- Picking the number is **deterministic and label-driven**: lines are scored on
+  what they call themselves, so "AT BETALE" wins and cash tendered, change and
+  VAT lose. When no label survives OCR we fall back to the largest amount and
+  say plainly that that's what we did.
+- Still **no line items** — one total per trip.
 - The spend ledger and the shopping list are **loosely coupled** — no item-level cost
   attribution.
 
@@ -132,6 +143,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - **Docker Compose:** app + Postgres. HTTPS via `tailscale serve` on the host.
 - Recipe parsing is a **deterministic, in-process string parser** — no external
   services, no LLM, no API keys.
+- Receipt OCR is **Tesseract in-process** (WebAssembly, vendored language
+  model) for the same reason — it's a library, not a service (§7).
 
 ---
 
@@ -159,7 +172,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   no re-fetching on a schedule. Single-page import of a URL *you* paste is
   supported (§1); it's a best-effort fetch of one page you chose, with the
   bookmarklet as the fallback when a site blocks it.
-- Receipt OCR / line-item spend and item-level cost attribution.
+- Line-item spend and item-level cost attribution. Receipts are OCR'd for their
+  total only (§7); nothing reads the individual products off them.
 - Budget targets and over-budget alerts.
 - Individual user accounts / multi-tenant isolation.
 - Store-aisle grouping of the shopping list.
