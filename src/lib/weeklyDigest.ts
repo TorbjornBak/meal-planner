@@ -91,6 +91,11 @@ export interface SendReport {
   weekStart: string;
   sent: string[];
   skipped: { email: string; reason: string }[];
+  /**
+   * The last delivery failure, kept so the "send me one now" button can say
+   * what went wrong instead of only that something did.
+   */
+  lastError?: unknown;
 }
 
 /**
@@ -167,6 +172,7 @@ export async function sendWeeklyDigest(opts: {
     } catch (err) {
       console.error(`weekly digest to ${user.email} failed`, err);
       report.skipped.push({ email: user.email, reason: "send-failed" });
+      report.lastError = err;
       // Release the claim so the next run retries rather than silently
       // skipping this member for the week.
       if (!opts.force) {

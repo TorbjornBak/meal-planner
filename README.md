@@ -100,7 +100,31 @@ where email goes; they don't partition anything.
   `SMTP_SECURE=true` on port 465. `APP_URL` has to be absolute — emails are read
   away from the app, so links can't be worked out from a request. Without these
   the app still runs; it just can't reset passwords or invite anyone.
-- **Check it works** from Settings → Weekly email → *Send me one now*.
+- **Check it works** from Settings → Weekly email. *Test connection* connects and
+  authenticates without sending, so a failure there separates "can't reach the
+  server" from "message refused"; *Send me one now* does the full round trip.
+
+### When email won't send
+
+Both buttons, and a failed invitation, report the actual SMTP error with the
+setting to go and check. The most common cause on a home box is that **the mail
+server runs on the host while the app runs in a container** — `SMTP_HOST=localhost`
+then means the container itself. Use the host's address, or add
+`host.docker.internal` via `extra_hosts` in `docker-compose.yml`.
+
+The others, in rough order of likelihood:
+
+| What you see | Usually means |
+| --- | --- |
+| `ECONNREFUSED` | Nothing listening — wrong host/port, or the loopback trap above. |
+| `ENOTFOUND` | The name resolves on the host but not inside the container. |
+| `ETIMEDOUT` | Firewall, or the wrong port for the TLS mode. |
+| `EAUTH` / `535` | Credentials rejected — some providers need an app-specific password. |
+| self-signed certificate | Set `SMTP_TLS_REJECT_UNAUTHORIZED=false`, only for a server you control. |
+| `wrong version number` | `SMTP_SECURE=true` belongs on 465; on 587 leave it false for STARTTLS. |
+| `EENVELOPE` / `550` | `MAIL_FROM` isn't an address the server will send as. |
+
+The full error is also in the app log (`docker compose logs app`).
 
 ### Weekly newsletter
 

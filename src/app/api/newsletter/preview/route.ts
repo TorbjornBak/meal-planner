@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/currentUser";
 import { isMailConfigured } from "@/lib/mail";
 import { sendWeeklyDigest } from "@/lib/weeklyDigest";
+import { describeMailError } from "@/lib/mailError";
 
 /**
  * POST /api/newsletter/preview — send myself this week's digest now (§9b).
@@ -22,7 +23,13 @@ export async function POST() {
   const report = await sendWeeklyDigest({ onlyUserId: user.id, force: true });
 
   if (report.sent.length === 0) {
-    return NextResponse.json({ error: "send-failed" }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: "send-failed",
+        ...describeMailError(report.lastError, process.env.SMTP_HOST),
+      },
+      { status: 502 },
+    );
   }
   return NextResponse.json({ ok: true, to: report.sent[0] });
 }

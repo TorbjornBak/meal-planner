@@ -56,6 +56,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       MAIL_FROM: ${MAIL_FROM:-}
+      # "false" only for a self-signed certificate on a server you control.
+      SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
       # Absolute base for links in email — emails are read away from the app,
       # so there's no request to infer an origin from. Your MagicDNS name (§10).
       APP_URL: ${APP_URL:-}
