@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
 
@@ -79,8 +79,9 @@ function weekLabel(weekStart: string): string {
     : `${start.getUTCDate()} ${month(start)} – ${end.getUTCDate()} ${month(end)}`;
 }
 
-export default function PlanPage() {
+function PlanCalendar() {
   const router = useRouter();
+  const params = useSearchParams();
   // Both read off the *local* calendar — "today" is the day you're living in,
   // even in the hours where that differs from UTC.
   const thisWeek = useMemo(() => mondayKey(new Date()), []);
@@ -91,7 +92,21 @@ export default function PlanPage() {
       .slice(0, 10);
   }, []);
 
-  const [weekStart, setWeekStart] = useState(thisWeek);
+  // ?weekStart=YYYY-MM-DD opens a specific week, so the weekly digest (§9b)
+  // can link at the week it's actually about rather than always at today's.
+  // Snapped to a Monday, since every other week here is one.
+  const initialWeek = useMemo(() => {
+    const raw = params.get("weekStart");
+    if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return thisWeek;
+    const d = new Date(`${raw}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return thisWeek;
+    // Snapped in UTC, not via mondayKey: the value came in as a UTC date, and
+    // reading local calendar fields off it lands a day early west of Greenwich.
+    const monday = new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000);
+    return monday.toISOString().slice(0, 10);
+  }, [params, thisWeek]);
+
+  const [weekStart, setWeekStart] = useState(initialWeek);
   const [plan, setPlan] = useState<WeekPlan | null>(null);
   const [recipes, setRecipes] = useState<RecipeOption[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -330,5 +345,14 @@ export default function PlanPage() {
         </span>
       )}
     </div>
+  );
+}
+
+export default function PlanPage() {
+  // useSearchParams needs a Suspense boundary to keep the page prerenderable.
+  return (
+    <Suspense fallback={null}>
+      <PlanCalendar />
+    </Suspense>
   );
 }

@@ -116,11 +116,54 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - **Weekly-spend bar chart + rolling average.**
 - Budget targets deferred to a later version.
 
-## 9. Users — household, one shared password
+## 9. Users — individual accounts, one shared household
 
-- No individual accounts, no per-user data isolation.
-- **One shared plan, one library, one ledger.**
-- The shared password is mostly defense-in-depth, since Tailscale already gates access.
+- **Each member has their own account** — email address and password. Sign-in is
+  per person, so access can be granted and revoked one member at a time, and
+  email has somewhere to go (§9b).
+- **Accounts gate entry; they do not partition data.** There is still **one
+  shared plan, one library, one ledger**. Nobody has a private recipe box.
+- **No roles.** A household is a handful of people who already share a kitchen;
+  anyone who can sign in can invite and remove members, the same way anyone can
+  tick off the shopping list.
+- **Passwords** are hashed with **scrypt** from the Node standard library — no
+  hashing dependency to keep patched, for the same reason parsing and OCR are
+  in-process (§12). Minimum ten characters; length beats character-class rules.
+- **Sessions are database rows**, not self-contained signed cookies, so signing
+  out — or removing a member — takes effect on the very next request instead of
+  whenever a cookie happens to lapse. The cookie holds a random token; only its
+  hash is stored, so a database dump doesn't hand over live sessions.
+- **Getting in when you can't:**
+  - **Forgot password** emails a single-use link, good for one hour. Requesting
+    one always reports the same thing whether or not the address is registered —
+    the endpoint is unauthenticated, and a different answer would turn it into a
+    way to test which addresses exist.
+  - **Invitations** are the same machinery with warmer copy and a seven-day life.
+    An invited member exists with no password until they choose one.
+  - Resetting a password **signs out every device**, since a reset is the remedy
+    for a stolen session as much as a forgotten password.
+  - **First run:** a fresh instance with no accounts opens `/setup` to create the
+    first one, and closes it permanently once an account exists.
+- Tailscale (§10) is still the primary gate; accounts are the second factor.
+
+## 9b. Weekly newsletter
+
+- **One email a week** to each member who wants it: the **coming week's dinners**,
+  night by night, and the **recipes added to the library** in the last seven days.
+- It's a **nudge, not a report** — the empty nights are stated rather than
+  omitted, and the call to action counts them ("Fill in the 4 empty nights").
+- **A week with nothing on it isn't sent.** A weekly email that regularly says
+  nothing is one people learn to ignore.
+- **Sent over your own SMTP server**, not a mail API — no account to sign up
+  for, no key to leak (§12).
+- **No scheduler inside the app.** Background jobs stay deferred; the app just
+  exposes `POST /api/newsletter/send`, authenticated with a bearer token, and
+  **cron on the host calls it**. Delivery is recorded per member per week, so a
+  cron that fires twice or a retried request can't send twice.
+- **Every mail carries plain text alongside the HTML**, and a working
+  **one-click unsubscribe** — both the footer link and the `List-Unsubscribe`
+  header the mail client's own button uses. Unsubscribing only clears the digest
+  opt-in; the account is untouched.
 
 ## 10. Hosting — home box via Tailscale (now)
 
@@ -162,7 +205,13 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   per-item checked state.
 - **PantryItem** — a name in the household's "always have" list.
 - **ShoppingTrip / Receipt** — date, store, total, receipt photo.
-- **Settings** — household size, shared password.
+- **User** — email, display name, scrypt password hash, newsletter opt-in (§9).
+- **Session** — a signed-in browser: hashed token, owner, sliding expiry (§9).
+- **AuthToken** — a single-use emailed link (reset / invitation), stored hashed,
+  with an expiry and a spent-at marker (§9).
+- **NewsletterSend** — one digest, one member, one week; the unique constraint is
+  what makes the weekly send idempotent (§9b).
+- **Settings** — household size.
 
 ---
 
@@ -171,10 +220,19 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Bulk or automated crawling of source sites — no crawler, no background jobs,
   no re-fetching on a schedule. Single-page import of a URL *you* paste is
   supported (§1); it's a best-effort fetch of one page you chose, with the
-  bookmarklet as the fallback when a site blocks it.
+  bookmarklet as the fallback when a site blocks it. The weekly newsletter
+  doesn't change this: the app runs no scheduler, it exposes an endpoint that
+  host cron calls (§9b).
 - Line-item spend and item-level cost attribution. Receipts are OCR'd for their
   total only (§7); nothing reads the individual products off them.
 - Budget targets and over-budget alerts.
-- Individual user accounts / multi-tenant isolation.
+- Per-user data isolation / multi-tenancy. Accounts exist (§9), but everyone in
+  the household still shares one plan, one library and one ledger.
+- Third-party sign-in (Google, Apple). It would make an external service a hard
+  dependency for reaching your own kitchen app, against §12 — and the tailnet's
+  `*.ts.net` name (§10) can't satisfy either provider's domain-verification
+  requirement anyway. Magic-link sign-in over our own SMTP, or passkeys, are the
+  self-contained ways to drop the password; `AuthToken.purpose` already carries a
+  `MAGIC_LINK` case so neither needs a migration.
 - Store-aisle grouping of the shopping list.
 - All-meals planning (breakfast/lunch).

@@ -38,27 +38,40 @@ src/lib/                  Core logic:
   ocr.ts                    receipt photo → text, local Tesseract (§7)
   receiptTotal.ts           pick the total out of OCR'd receipt text (§7)
   spending.ts               weekly spend aggregation (§8)
-  auth.ts                   shared-password session (§9)
+  auth.ts                   accounts, sessions, emailed link tokens (§9)
+  password.ts               scrypt password hashing (§9)
+  currentUser.ts            the signed-in user inside a request (§9)
+  mail.ts                   SMTP transport, your own server (§9, §9b)
+  emailLayout.ts            dependency-free email HTML primitives
+  emails.ts                 reset / invitation / password-changed templates (§9)
+  newsletter.ts             weekly digest composition, pure + tested (§9b)
+  weeklyDigest.ts           gathering and delivering the digest (§9b)
   prisma.ts                 Prisma client singleton
 src/app/                  App Router pages (dashboard, plan, recipes,
-                          shopping, spending, settings, login)
+                          shopping, spending, settings, login, setup, forgot,
+                          reset/[token])
 src/app/api/             Route handlers (parse, import, capture, recipes, plan,
-                          shopping, pantry, trips, receipts/ocr, settings, login)
-src/middleware.ts        Gates every route behind the shared session
+                          shopping, pantry, trips, receipts/ocr, settings,
+                          login, logout, setup, account, users, password/*,
+                          newsletter/*)
+src/middleware.ts        Gates every route behind a signed-in account (§9)
 tessdata/                Vendored Tesseract language model for receipt OCR (§7)
 scripts/backup.sh        Nightly Borg backup to a Hetzner Storage Box (§11)
 ```
 
 ## Local development
 
-1. Copy env: `cp .env.example .env` and fill in `HOUSEHOLD_PASSWORD` and
-   `AUTH_SECRET`.
+1. Copy env: `cp .env.example .env` and fill in `AUTH_SECRET`. The `SMTP_*`,
+   `MAIL_FROM` and `APP_URL` values are optional locally — without them the app
+   runs, it just can't send password resets, invitations or the weekly digest.
 2. Start Postgres (either `docker compose up db` or your own instance) and point
    `DATABASE_URL` at it.
 3. Install deps: `npm install`.
 4. Apply the schema: `npm run prisma:migrate` (creates the initial migration).
 5. (Optional) seed staples: `npx tsx prisma/seed.ts`.
 6. Run: `npm run dev` → http://localhost:3000.
+7. First run has no accounts, so the app sends you to `/setup` to create one.
+   Invite the rest of the household from Settings afterwards.
 
 `npm test` runs the unit tests (Node's built-in runner, no framework — it reads
 the TypeScript directly).
@@ -71,6 +84,39 @@ the TypeScript directly).
   (tailscaled runs on the host). No reverse proxy or cert management (§10).
 - Migrations run automatically on container start (`prisma migrate deploy`).
 - Schedule `scripts/backup.sh` nightly (§11).
+
+## Accounts and email (§9, §9b)
+
+Each household member has their own account — email and password — but they all
+share one plan, one library and one ledger. Accounts are how you sign in and
+where email goes; they don't partition anything.
+
+- **First run:** an instance with no accounts opens `/setup` to create the first
+  one, then closes that route for good. Everyone else is invited from Settings.
+- **Forgot a password:** `/forgot` mails a single-use link, good for one hour.
+  Resetting signs out every device.
+- **Email** goes through your own SMTP server. Set `SMTP_HOST`, `MAIL_FROM` and
+  `APP_URL`; add `SMTP_USER`/`SMTP_PASS` if your relay wants authentication, and
+  `SMTP_SECURE=true` on port 465. `APP_URL` has to be absolute — emails are read
+  away from the app, so links can't be worked out from a request. Without these
+  the app still runs; it just can't reset passwords or invite anyone.
+- **Check it works** from Settings → Weekly email → *Send me one now*.
+
+### Weekly newsletter
+
+The app runs no scheduler — it exposes an endpoint and host cron calls it, so
+the "no background jobs" rule (§12) still holds. Add to the host's crontab:
+
+```sh
+0 17 * * FRI curl -fsS -X POST \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  https://box.your-tailnet.ts.net/api/newsletter/send
+```
+
+Friday evening suits a weekend shop: the digest looks ahead to the coming
+Monday. It's idempotent per member per week, so a retry can't double-send, and
+a week with no dinners and no new recipes isn't sent at all. Pass
+`?weekStart=YYYY-MM-DD` to re-run a specific week by hand.
 
 ## CI/CD (Forgejo Actions)
 
@@ -92,8 +138,9 @@ inbound access.
    use the host Docker daemon. The runner's user needs to be in the `docker`
    group, and `git`, `curl` and `node` must be on its PATH.
 2. **Deploy directory.** `mkdir -p /srv/mealplanner` and put the production
-   `.env` there (`HOUSEHOLD_PASSWORD`, `AUTH_SECRET`, `POSTGRES_*`). It is never
-   overwritten by a deploy — only `docker-compose.yml` is synced.
+   `.env` there (`AUTH_SECRET`, `POSTGRES_*`, and for email `SMTP_*`,
+   `MAIL_FROM`, `APP_URL`, `CRON_SECRET`). It is never overwritten by a deploy —
+   only `docker-compose.yml` is synced.
 3. **Registry access.** Enable the Forgejo package registry, then in the repo
    settings add:
    - variable `REGISTRY_HOST` — the Forgejo host, e.g. `forgejo.example.ts.net`

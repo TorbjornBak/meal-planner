@@ -1,6 +1,7 @@
 // MealPlanner v1 data model — see DESIGN.md §"Data model sketch".
 //
-// One household, one shared plan/library/ledger. No per-user tables (§9).
+// One household, one shared plan/library/ledger. Individual accounts exist for
+// sign-in and for addressing email, not for isolating data (§9).
 
 generator client {
   provider = "prisma-client-js"
@@ -176,6 +177,92 @@ model Receipt {
   photo    Bytes
   mimeType String
   uploadedAt DateTime   @default(now())
+}
+
+// -----------------------------------------------------------------------------
+// Accounts (§9)
+// -----------------------------------------------------------------------------
+
+/// One household member. Accounts exist so sign-in can be revoked per person
+/// and so email has somewhere to go — *not* to isolate data. Every member sees
+/// the same plan, library and ledger.
+model User {
+  id             String    @id @default(cuid())
+  /// Lowercased at write time; the login identifier.
+  email          String    @unique
+  /// Display name for greetings in email. Optional — email alone is enough.
+  name           String?
+  /// Scrypt hash (see src/lib/password.ts). Null between being invited and
+  /// choosing a password, which is why invited members can't yet sign in.
+  passwordHash   String?
+  /// Weekly digest opt-in (§9b). One-click unsubscribe flips this to false.
+  newsletterOptIn Boolean  @default(true)
+  sessions       Session[]
+  authTokens     AuthToken[]
+  newsletters    NewsletterSend[]
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+/// A signed-in browser. Server-side so signing out (or removing a member)
+/// takes effect immediately, unlike a self-contained signed cookie.
+model Session {
+  id        String   @id @default(cuid())
+  /// SHA-256 of the cookie's random token. The raw token is never stored, so
+  /// a database leak doesn't hand over live sessions.
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  /// Refreshed lazily so an active session slides forward rather than expiring
+  /// mid-shop.
+  lastSeenAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// What a one-time emailed link is for. Password reset and invitation are the
+/// same mechanism pointed at different copy; MAGIC_LINK is here so passwordless
+/// sign-in can be added without a migration.
+enum AuthTokenPurpose {
+  PASSWORD_RESET
+  INVITE
+  MAGIC_LINK
+}
+
+/// A single-use, expiring token delivered by email. Stored hashed for the same
+/// reason sessions are.
+model AuthToken {
+  id        String           @id @default(cuid())
+  tokenHash String           @unique
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   AuthTokenPurpose
+  expiresAt DateTime
+  /// Set the moment it's redeemed; a redeemed token is dead even if the link
+  /// is opened again from the recipient's mail history.
+  usedAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// One digest delivered to one member for one week. The unique constraint is
+/// the idempotency guard: a cron that fires twice can't send twice (§9b).
+model NewsletterSend {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The Monday of the week the digest looks ahead to (date-only).
+  weekStart DateTime @db.Date
+  sentAt    DateTime @default(now())
+
+  @@unique([userId, weekStart])
+  @@index([weekStart])
 }
 
 // -----------------------------------------------------------------------------

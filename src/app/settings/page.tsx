@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AccountCard } from "./AccountCard";
+import { HouseholdCard } from "./HouseholdCard";
 
-// Settings (§4, §9) — household size (scales every recipe) and the pantry list
-// (§5). The shared password lives in the environment, not here.
+// Settings (§4, §9) — household size (scales every recipe), the pantry list
+// (§5), your own account, and who else is in the household.
 
 interface PantryItem {
   id: string;
@@ -171,6 +173,9 @@ export default function SettingsPage() {
           the button points at the right place and works from other sites.
         </p>
       </div>
+
+      <AccountCard />
+      <HouseholdCard />
     </>
   );
 }
