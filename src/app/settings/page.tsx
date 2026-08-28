@@ -4,19 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { AccountCard } from "./AccountCard";
 import { HouseholdCard } from "./HouseholdCard";
 
-// Settings (§4, §9) — household size (scales every recipe), the pantry list
-// (§5), your own account, and who else is in the household.
-
-interface PantryItem {
-  id: string;
-  name: string;
-}
+// Settings (§4, §9) — household size (scales every recipe), your own account,
+// and who else is in the household. The pantry list (§5) has its own page; all
+// that lives here is the way in.
 
 export default function SettingsPage() {
   const [householdSize, setHouseholdSize] = useState<number | "">("");
   const [savedSize, setSavedSize] = useState<number | null>(null);
-  const [pantry, setPantry] = useState<PantryItem[]>([]);
-  const [newItem, setNewItem] = useState("");
+  const [pantryCount, setPantryCount] = useState<number | null>(null);
   const [bookmarklet, setBookmarklet] = useState("");
   const bmRef = useRef<HTMLAnchorElement>(null);
 
@@ -29,7 +24,8 @@ export default function SettingsPage() {
       });
     fetch("/api/pantry")
       .then((r) => r.json())
-      .then(setPantry);
+      .then((items) => setPantryCount(Array.isArray(items) ? items.length : null))
+      .catch(() => {});
     fetch("/api/capture/info")
       .then((r) => r.json())
       .then((d) => {
@@ -58,27 +54,6 @@ export default function SettingsPage() {
       body: JSON.stringify({ householdSize }),
     }).then((r) => r.json());
     setSavedSize(s.householdSize);
-  }
-
-  async function addPantry(e: React.FormEvent) {
-    e.preventDefault();
-    const name = newItem.trim();
-    if (!name) return;
-    const item = await fetch("/api/pantry", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    }).then((r) => r.json());
-    setNewItem("");
-    // Upsert into local state (POST is idempotent by normalized name).
-    setPantry((p) =>
-      p.some((x) => x.id === item.id) ? p : [...p, item].sort((a, b) => a.name.localeCompare(b.name)),
-    );
-  }
-
-  async function removePantry(id: string) {
-    setPantry((p) => p.filter((x) => x.id !== id));
-    await fetch(`/api/pantry?id=${id}`, { method: "DELETE" });
   }
 
   const dirty = householdSize !== "" && householdSize !== savedSize;
@@ -110,34 +85,16 @@ export default function SettingsPage() {
           Items matching these names get pulled out of the main shopping list into
           their own section.
         </p>
-
-        <form onSubmit={addPantry} style={{ marginBottom: 8 }}>
-          <input
-            value={newItem}
-            onChange={(e) => setNewItem(e.target.value)}
-            placeholder="e.g. Salt"
-          />{" "}
-          <button type="submit">Add</button>
-        </form>
-
-        {pantry.length === 0 ? (
-          <p className="muted">No pantry items yet.</p>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0 }}>
-            {pantry.map((p) => (
-              <li key={p.id} style={{ padding: "3px 0" }}>
-                {p.name}{" "}
-                <button
-                  className="muted"
-                  onClick={() => removePantry(p.id)}
-                  style={{ fontSize: "0.85em" }}
-                >
-                  remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <p>
+          <a href="/pantry">
+            {pantryCount === null
+              ? "Open the pantry list"
+              : pantryCount === 0
+                ? "Add your first pantry item"
+                : `${pantryCount} ${pantryCount === 1 ? "thing" : "things"} in the pantry`}{" "}
+            →
+          </a>
+        </p>
       </div>
 
       <div className="card">
