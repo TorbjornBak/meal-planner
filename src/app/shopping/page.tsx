@@ -115,8 +115,8 @@ export default function ShoppingPage() {
         <div className="card">
           <h2>Pantry — check you have these</h2>
           <p className="muted">
-            Matched against your pantry list and moved here (never deleted). Pull
-            one back onto the main list if you&rsquo;ve run out.
+            Matched against your <a href="/pantry">pantry list</a> and moved here
+            (never deleted). Pull one back onto the main list if you&rsquo;ve run out.
           </p>
           {pantry.map((item) => (
             <div
