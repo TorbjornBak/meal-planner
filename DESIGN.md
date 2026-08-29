@@ -51,6 +51,13 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Each night holds **any number of dinners** — add a second dish for a big
   night, or stack sides — each with its own photo and servings override.
 - Nights can be left empty (leftovers / eating out).
+- **Dinners can be dragged from night to night.** A plan changes after it's
+  made — a late meeting moves Thursday's stew to Saturday — and saying so should
+  not mean deleting the dinner and searching the library for it again, which
+  also loses its servings override (§4). Drag by the grip on the card: pointer
+  events, so it works with a finger as well as a mouse, and the week auto-scrolls
+  when you drag past the edge of the screen. The same move is on the arrow keys,
+  since no keyboard has a drag gesture.
 - **Page back and forward through weeks.** Asking for a week creates it, so next
   week's plan exists the moment you look at it.
 - Each night shows the recipe's photo (§2b) and links through to the cooking view.
