@@ -6,16 +6,16 @@ import { mondayOf } from "@/lib/newsletter";
 /**
  * POST /api/newsletter/send — deliver the weekly digest (§9b).
  *
- * Triggered by cron on the host rather than by a scheduler inside the app.
- * DESIGN.md rules out background jobs, and this keeps that true: the app has
- * no timer, it just exposes an endpoint that something else calls.
+ * Sending by hand. The scheduled send is the app's own (src/instrumentation.ts),
+ * so nothing external has to call this for the digest to go out; what it's for
+ * is re-running a particular week, or forcing one out without waiting:
  *
- *   0 17 * * FRI curl -fsS -X POST \
- *     -H "Authorization: Bearer $CRON_SECRET" \
- *     https://box.example.ts.net/api/newsletter/send
+ *   curl -sS -X POST -H "Authorization: Bearer $CRON_SECRET" \
+ *     "https://box.example.ts.net/api/newsletter/send?weekStart=2026-08-31"
  *
- * Authenticated with CRON_SECRET, not a session — cron has no cookie jar. The
- * route is idempotent per member per week, so a retry is safe.
+ * Authenticated with CRON_SECRET rather than a session, so it can be called
+ * from a script with no cookie jar. Idempotent per member per week, so a repeat
+ * is safe: it retries whoever the scheduler couldn't reach and skips the rest.
  */
 export async function POST(req: Request) {
   const secret = process.env.CRON_SECRET;

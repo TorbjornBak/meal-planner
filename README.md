@@ -129,19 +129,46 @@ The full error is also in the app log (`docker compose logs app`).
 
 ### Weekly newsletter
 
-The app runs no scheduler — it exposes an endpoint and host cron calls it, so
-the "no background jobs" rule (§12) still holds. Add to the host's crontab:
+The app schedules the digest itself — **there is no crontab to set up.** Friday
+17:00 by default, which suits a weekend shop: the digest looks ahead to the
+coming Monday, while there's still time to fill the empty nights in.
+
+| Variable | Default | |
+| --- | --- | --- |
+| `DIGEST_SEND_DAY` | `FRI` | `MON`–`SUN`. |
+| `DIGEST_SEND_HOUR` | `17` | `0`–`23`, a wall clock in `DIGEST_TIMEZONE`. |
+| `DIGEST_TIMEZONE` | `Europe/Copenhagen` | Falls back to `TZ`. |
+| `DIGEST_SCHEDULER` | `on` | `off` to stop sending entirely. |
+
+Because the hour is a wall clock rather than a fixed UTC time, the mail doesn't
+shift by an hour when the clocks change.
+
+The schedule asks whether the week's digest *is owed*, not whether the hour has
+just struck, and re-asks every 15 minutes until it isn't. So a box that was off
+at 17:00 on Friday sends when it comes back, and a member whose delivery failed
+— a mail server having a moment, say — is retried on the next tick rather than
+missing the week. Delivery is recorded per member per week, so none of that can
+send twice. A week with no dinners, no settled nights and no new recipes isn't
+sent at all.
+
+On startup the log says what it's doing:
+
+```
+[digest] weekly digest scheduled for Friday 17:00 Europe/Copenhagen
+```
+
+If that line is missing, the scheduler didn't start — `docker compose logs app
+| grep digest` will say why (no SMTP configured, or `DIGEST_SCHEDULER=off`).
+
+`POST /api/newsletter/send` is still there for sending by hand, authenticated
+with `CRON_SECRET`. Pass `?weekStart=YYYY-MM-DD` to re-run a specific week:
 
 ```sh
-0 17 * * FRI curl -fsS -X POST \
-  -H "Authorization: Bearer $CRON_SECRET" \
+curl -sS -X POST -H "Authorization: Bearer <your CRON_SECRET>" \
   https://box.your-tailnet.ts.net/api/newsletter/send
 ```
 
-Friday evening suits a weekend shop: the digest looks ahead to the coming
-Monday. It's idempotent per member per week, so a retry can't double-send, and
-a week with no dinners and no new recipes isn't sent at all. Pass
-`?weekStart=YYYY-MM-DD` to re-run a specific week by hand.
+It returns a JSON report naming who it sent to and why it skipped anyone else.
 
 ## CI/CD (Forgejo Actions)
 

@@ -8,6 +8,7 @@
 import { prisma } from "@/lib/prisma";
 import { unsubscribeToken } from "@/lib/auth";
 import { appUrl, sendMail } from "@/lib/mail";
+import { type DigestSchedule, dueWeekStart } from "@/lib/digestSchedule";
 import {
   type DigestNight,
   type DigestRecipe,
@@ -19,6 +20,17 @@ import {
 
 /** How far back "new in the library" reaches. One digest, one week. */
 const NEW_RECIPE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Who the digest is for: members who asked for it and can act on it.
+ *
+ * An invited member who hasn't set a password yet has no account to log into,
+ * so a mail full of plan links would be a dead end. Declared once because two
+ * queries ask the question — who to send to, and whether everyone already has
+ * their copy — and an answer that differed between them would either skip a
+ * member for the week or re-poll a finished week forever.
+ */
+const ELIGIBLE = { newsletterOptIn: true, passwordHash: { not: null } } as const;
 
 export interface DigestContent {
   weekStart: Date;
@@ -111,8 +123,8 @@ export interface SendReport {
 /**
  * Send this week's digest to everyone who wants it (§9b).
  *
- * Idempotent: the unique index on (userId, weekStart) means a cron that fires
- * twice, or a retried request, can't deliver twice. `force` bypasses that for
+ * Idempotent: the unique index on (userId, weekStart) means a scheduler tick
+ * that repeats, or a retried request, can't deliver twice. `force` bypasses that for
  * the "send me one now" preview button, which deliberately re-sends.
  */
 export async function sendWeeklyDigest(opts: {
@@ -131,7 +143,7 @@ export async function sendWeeklyDigest(opts: {
   const users = await prisma.user.findMany({
     where: {
       ...(opts.onlyUserId ? { id: opts.onlyUserId } : {}),
-      ...(opts.force ? {} : { newsletterOptIn: true, passwordHash: { not: null } }),
+      ...(opts.force ? {} : ELIGIBLE),
     },
     select: { id: true, email: true, name: true, newsletterOptIn: true },
   });
@@ -194,4 +206,53 @@ export async function sendWeeklyDigest(opts: {
   }
 
   return report;
+}
+
+/**
+ * Whether every eligible member already has this week's copy.
+ *
+ * The scheduler ticks all weekend, but the week's mail only goes out once.
+ * Without this, each tick would re-read the plan and the library to rediscover
+ * that there's nothing left to do. Two cheap id queries instead.
+ */
+async function allDelivered(weekStart: Date): Promise<boolean> {
+  const [users, sends] = await Promise.all([
+    prisma.user.findMany({ where: ELIGIBLE, select: { id: true } }),
+    prisma.newsletterSend.findMany({ where: { weekStart }, select: { userId: true } }),
+  ]);
+
+  // Nobody to send to is "nothing outstanding", not "send forever".
+  if (users.length === 0) return true;
+
+  const delivered = new Set(sends.map((s) => s.userId));
+  return users.every((u) => delivered.has(u.id));
+}
+
+/**
+ * Send this week's digest if it's due and hasn't gone out yet (§9b).
+ *
+ * The scheduler's whole body of work. Called on a timer rather than by cron,
+ * and safe to call as often as you like: `dueWeekStart` says whether the send
+ * hour has passed, `allDelivered` says whether there's anything left to do, and
+ * the unique index on (userId, weekStart) is the backstop if two processes ask
+ * at once.
+ *
+ * Because due-ness stays true for the rest of the week rather than firing once,
+ * two things fix themselves that host cron could only lose: a box that was off
+ * at the send hour sends when it comes back, and a member whose delivery failed
+ * — their claim released by sendWeeklyDigest — is retried on the next tick
+ * instead of waiting for a week that has already moved on.
+ *
+ * Returns null when there was nothing to do, so a caller can stay quiet.
+ */
+export async function sendDueDigest(
+  opts: { now?: Date; schedule?: DigestSchedule } = {},
+): Promise<SendReport | null> {
+  const now = opts.now ?? new Date();
+
+  const weekStart = dueWeekStart(now, opts.schedule);
+  if (!weekStart) return null;
+  if (await allDelivered(weekStart)) return null;
+
+  return sendWeeklyDigest({ weekStart, now });
 }

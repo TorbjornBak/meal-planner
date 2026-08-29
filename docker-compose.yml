@@ -61,8 +61,19 @@ services:
       # Absolute base for links in email — emails are read away from the app,
       # so there's no request to infer an origin from. Your MagicDNS name (§10).
       APP_URL: ${APP_URL:-}
-      # Bearer token for the cron-triggered weekly send (§9b).
+      # Bearer token for triggering a send by hand, e.g. to re-run one week
+      # (§9b). The scheduled send no longer needs it.
       CRON_SECRET: ${CRON_SECRET:-}
+      # The weekly digest schedules itself in-process (§9b) — there is no
+      # crontab to keep. Friday 17:00 Europe/Copenhagen unless overridden.
+      DIGEST_SEND_DAY: ${DIGEST_SEND_DAY:-FRI}
+      DIGEST_SEND_HOUR: ${DIGEST_SEND_HOUR:-17}
+      DIGEST_TIMEZONE: ${DIGEST_TIMEZONE:-Europe/Copenhagen}
+      # "off" to stop the app sending it at all.
+      DIGEST_SCHEDULER: ${DIGEST_SCHEDULER:-on}
+      # The container is UTC otherwise, which would make every local time in
+      # the logs an hour or two out from the household's clocks.
+      TZ: ${TZ:-Europe/Copenhagen}
     ports:
       # Loopback-only; `tailscale serve` on the host proxies this to the tailnet
       # over HTTPS. Not reachable from the LAN.
