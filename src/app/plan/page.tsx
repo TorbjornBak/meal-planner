@@ -14,6 +14,8 @@ import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
 import { nightNoteLabel, type NightNote } from "@/lib/nightNotes";
 import { searchRecipes } from "@/lib/recipeSearch";
+import { dinnerPlace, moveDinner } from "@/lib/planMove";
+import { useDinnerDrag, type DropTarget } from "./useDinnerDrag";
 
 // Weekly dinner plan (§3, §4), laid out as a calendar week. Assign one or more
 // recipes to any night; leave nights empty for leftovers / eating out. Optional
@@ -24,7 +26,9 @@ import { searchRecipes } from "@/lib/recipeSearch";
 // whichever week you ask for, so next week exists the moment you look at it.
 //
 // Dinners are added through one searchable dialog shared by all seven nights,
-// not a <select> per night: see the picker section below.
+// not a <select> per night: see the picker section below. Once on the week they
+// can be dragged from night to night, or walked there with the arrow keys: see
+// the reshuffling section.
 
 const DAYS = [
   "Monday",
@@ -45,6 +49,13 @@ interface SlotRecipe {
 interface Slot {
   id: string;
   dayOfWeek: number;
+  /**
+   * Orders the dinners within one night. The API sends the week already sorted
+   * by it, so rendering a night is a filter and nothing more — but reshuffling
+   * one (see moveDinnerTo) has to renumber, and can't do that from array order
+   * alone.
+   */
+  position: number;
   recipeId: string;
   servingsOverride: number | null;
   recipe: SlotRecipe | null;
@@ -138,6 +149,12 @@ function PlanCalendar() {
   // any were dropped because their recipe is gone.
   const [copying, setCopying] = useState(false);
   const [copyNote, setCopyNote] = useState<string | null>(null);
+  // What the last reshuffle did — announced always, shown only when it failed.
+  // See moveDinnerTo below.
+  const [moveNote, setMoveNote] = useState<{
+    text: string;
+    problem: boolean;
+  } | null>(null);
 
   useEffect(() => {
     fetch("/api/recipes")
@@ -149,9 +166,11 @@ function PlanCalendar() {
     let stale = false;
     // Cleared first: paging to another week shouldn't leave the old week's
     // dinners on screen looking like they belong to the new one. Nor its copy
-    // note, which is a sentence about a week you're no longer looking at.
+    // note or its last move, both of them sentences about a week you're no
+    // longer looking at.
     setPlan(null);
     setCopyNote(null);
+    setMoveNote(null);
     fetch(`/api/plan?weekStart=${weekStart}`)
       .then((r) => r.json())
       .then((p) => {
@@ -255,6 +274,127 @@ function PlanCalendar() {
     },
     [],
   );
+
+  // --- Reshuffling dinners -------------------------------------------------
+  //
+  // A plan changes after it's been made: a late meeting moves Thursday's stew
+  // to Saturday, and the two dishes on Sunday want swapping round. Saying so
+  // used to mean removing the dinner and adding it again on the other night,
+  // which quietly threw away its servings override (§4) and sent you back
+  // through the picker for a recipe already sitting on the week.
+  //
+  // The move is optimistic, and firmly so: a card has to land under the finger
+  // that dropped it, or the gesture reads as broken. `moveDinner` renumbers the
+  // week here exactly as /api/plan/move renumbers it there — same function,
+  // same input — so the two can't drift and there is nothing to reconcile
+  // afterwards. When the request does fail the week is refetched rather than
+  // patched back, because by then what it holds is the server's business.
+  const moveDinnerTo = useCallback(
+    async (slotId: string, day: number, index: number) => {
+      if (!plan) return;
+      const name = plan.slots.find((s) => s.id === slotId)?.recipe?.name;
+      // Read before the move, so the note can tell the two cases apart: a
+      // dinner that changed nights, and one that only changed places on the
+      // night it was already on. "Moved to Monday" is a lie about the second.
+      const from = dinnerPlace(plan.slots, slotId);
+      const nightSize = plan.slots.filter((s) => s.dayOfWeek === day).length;
+      setPlan((p) =>
+        p ? { ...p, slots: moveDinner(p.slots, slotId, day, index) } : p,
+      );
+      setMoveNote({
+        text:
+          from?.day === day
+            ? `${name ?? "Dinner"} moved to ${Math.min(index, nightSize - 1) + 1} of ${nightSize} on ${DAYS[day]}.`
+            : `${name ?? "Dinner"} moved to ${DAYS[day]}.`,
+        problem: false,
+      });
+
+      const res = await fetch("/api/plan/move", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slotId, dayOfWeek: day, position: index }),
+      });
+      if (res.ok) return;
+
+      const fresh: WeekPlan = await fetch(
+        `/api/plan?weekStart=${weekStart}`,
+      ).then((r) => r.json());
+      // Only if it's still the week on screen, as in copyLastWeek: paging away
+      // mid-move already loaded another week and this would stamp over it.
+      setPlan((p) => (p && p.id === fresh.id ? fresh : p));
+      setMoveNote({
+        text: `Couldn't move ${name ?? "that dinner"} — the week is back as it was saved.`,
+        problem: true,
+      });
+    },
+    [plan, weekStart],
+  );
+
+  const dropDinner = useCallback(
+    (slotId: string, at: DropTarget) => {
+      const from = plan ? dinnerPlace(plan.slots, slotId) : null;
+      // A drag that ends where it began is the commonest gesture of all — you
+      // pick a card up and think better of it — and it should cost nothing.
+      if (!from || (from.day === at.day && from.index === at.index)) return;
+      void moveDinnerTo(slotId, at.day, at.index);
+    },
+    [plan, moveDinnerTo],
+  );
+
+  const { calendarRef, dragSlotId, target, handleProps } =
+    useDinnerDrag(dropDinner);
+
+  // The grip is a real button, so it can be tabbed to; this is what it does
+  // once you're on it. Dragging is a pointer gesture and no keyboard has one,
+  // so without these arrows the only people who could reshuffle a week would be
+  // the ones holding a mouse or a phone. Left and right walk a dinner across
+  // the week and land it last on its new night; up and down reorder the night
+  // it's on. Both stop at the edges rather than wrapping — a week doesn't wrap,
+  // and Monday is not "after" Sunday to anyone reading a calendar.
+  const focusHandle = useRef<string | null>(null);
+  const nudge = useCallback(
+    (e: KeyboardEvent<HTMLButtonElement>, slotId: string) => {
+      if (!plan) return;
+      const from = dinnerPlace(plan.slots, slotId);
+      if (!from) return;
+      const nightSize = (day: number) =>
+        plan.slots.filter((s) => s.dayOfWeek === day).length;
+
+      // The index a dinner takes when it arrives on another night: last, which
+      // is where every other way of adding one puts it.
+      const arriving = (day: number) => ({ day, index: nightSize(day) });
+      const to =
+        e.key === "ArrowLeft" && from.day > 0
+          ? arriving(from.day - 1)
+          : e.key === "ArrowRight" && from.day < 6
+            ? arriving(from.day + 1)
+            : e.key === "ArrowUp" && from.index > 0
+              ? { day: from.day, index: from.index - 1 }
+              : e.key === "ArrowDown" && from.index < nightSize(from.day) - 1
+                ? { day: from.day, index: from.index + 1 }
+                : null;
+      if (!to) return;
+      // Only now: an arrow that couldn't move the dinner should still scroll
+      // the page, the way an arrow key normally does.
+      e.preventDefault();
+      focusHandle.current = slotId;
+      void moveDinnerTo(slotId, to.day, to.index);
+    },
+    [plan, moveDinnerTo],
+  );
+
+  // Moving a dinner to another night re-parents its card, so React rebuilds it
+  // and the focus that was on its grip is gone — after one arrow press the next
+  // one would go nowhere. Put it back on the grip that was just used, so the
+  // week can be walked with the keys held down.
+  useEffect(() => {
+    const slotId = focusHandle.current;
+    if (!slotId) return;
+    focusHandle.current = null;
+    document
+      .querySelector<HTMLElement>(`[data-drag-handle="${slotId}"]`)
+      ?.focus();
+  });
 
   // Fill this week from the week before it (§3). Households eat on a rotation,
   // and rebuilding the same seven nights by hand every Sunday is the friction
@@ -476,7 +616,10 @@ function PlanCalendar() {
         </p>
       )}
 
-      <div className="calendar">
+      <div
+        ref={calendarRef}
+        className={`calendar${dragSlotId ? " calendar-dragging" : ""}`}
+      >
         {DAYS.map((dayName, dayOfWeek) => {
           const date = addDays(weekStart, dayOfWeek);
           const daySlots =
@@ -485,10 +628,29 @@ function PlanCalendar() {
             (n) => n.dayOfWeek === dayOfWeek,
           );
 
+          // Where a dragged dinner would land, if this is the night it's over.
+          // Counted among the *other* dinners: the card in your hand keeps its
+          // place until you let go, and moveDinner likewise counts a place in
+          // the stack after the dinner has been lifted out of it.
+          const landing =
+            dragSlotId && target?.day === dayOfWeek ? target : null;
+          const others = landing
+            ? daySlots.filter((s) => s.id !== dragSlotId)
+            : [];
+          // Drawn above the card it would push down, or below the last one when
+          // it's going to the bottom. An empty night says it with the highlight
+          // on the card alone — there's nothing there to draw a line against.
+          const dropBefore = landing ? (others[landing.index]?.id ?? null) : null;
+          const dropAfter =
+            landing && !dropBefore ? (others.at(-1)?.id ?? null) : null;
+
           return (
             <div
-              className={`day${date === today ? " day-today" : ""}`}
+              className={`day${date === today ? " day-today" : ""}${
+                landing ? " day-drop" : ""
+              }`}
               key={dayOfWeek}
+              data-day={dayOfWeek}
             >
               <div className="day-head">
                 <span className="day-name">{dayName}</span>
@@ -504,11 +666,19 @@ function PlanCalendar() {
                   // identically — the ambiguity notes exist to remove.
                   <p className="muted day-empty">Nothing planned yet</p>
                 ) : (
-                  daySlots.map((slot) => {
+                  daySlots.map((slot, nth) => {
                     const recipe = slot.recipe;
                     const photo = recipe ? recipeImageSrc(recipe) : null;
                     return (
-                      <div className="dinner" key={slot.id}>
+                      <div
+                        className={`dinner${
+                          slot.id === dragSlotId ? " dinner-dragging" : ""
+                        }${slot.id === dropBefore ? " dinner-drop-before" : ""}${
+                          slot.id === dropAfter ? " dinner-drop-after" : ""
+                        }`}
+                        key={slot.id}
+                        data-slot-id={slot.id}
+                      >
                         <Link
                           href={`/recipes/${slot.recipeId}`}
                           className="day-photo"
@@ -522,6 +692,27 @@ function PlanCalendar() {
                             <span className="recipe-thumb-empty">🍽</span>
                           )}
                         </Link>
+                        {/* A handle, not the whole card: the photo and the
+                            title are both links to the recipe, and a press that
+                            might be either a tap or the start of a drag has to
+                            guess — always at the expense of one of them. The
+                            label says where the dinner is now, because after an
+                            arrow-key move that is the only thing that reports
+                            where it went. */}
+                        <button
+                          className="dinner-grip"
+                          data-drag-handle={slot.id}
+                          {...handleProps(slot.id)}
+                          onKeyDown={(e) => nudge(e, slot.id)}
+                          aria-label={`Move ${recipe?.name ?? "dinner"} — ${dayName}${
+                            daySlots.length > 1
+                              ? `, ${nth + 1} of ${daySlots.length}`
+                              : ""
+                          }`}
+                          title="Drag to another night, or use the arrow keys"
+                        >
+                          ⠿
+                        </button>
                         <button
                           className="dinner-remove"
                           onClick={() => removeDinner(slot.id)}
@@ -600,6 +791,18 @@ function PlanCalendar() {
           );
         })}
       </div>
+
+      {/* What the move just did. Ordinary moves are announced but not shown —
+          the card visibly moved, and a line of text repeating that would be
+          noise to everyone who can see it. A failure is shown, because then the
+          week on screen is not the week you just asked for. */}
+      <p
+        className={`move-note${moveNote?.problem ? "" : " sr-only"}`}
+        role="status"
+        aria-live="polite"
+      >
+        {moveNote?.text ?? ""}
+      </p>
 
       {/*
         The picker. Its contents only exist while it's open, which is what

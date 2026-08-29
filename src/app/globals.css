@@ -644,3 +644,107 @@ table {
   color: var(--fg);
   border-style: solid;
 }
+
+/* --- Dragging a dinner to another night (plan page, §3) --------------------- */
+
+/*
+ * The grip. Only the grip starts a drag, because the rest of the card is links —
+ * the photo and the title both open the recipe — and a press that might be
+ * either a tap or the start of a drag has to guess, always at the expense of
+ * one of them. It mirrors .dinner-remove across the photo's top corners: same
+ * size, same tinted disc so it reads on any image.
+ *
+ * `touch-action: none` is what stops a phone claiming the gesture as a scroll,
+ * and it is on the grip alone — a swipe anywhere else on the calendar still
+ * scrolls the week, which is how you get from Monday to Sunday.
+ */
+.dinner-grip {
+  position: absolute;
+  top: 0.3rem;
+  left: 0.3rem;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.95rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+.dinner-grip:active {
+  cursor: grabbing;
+}
+
+/*
+ * The card being dragged keeps its place in the night; only the drop indicator
+ * moves. Lifting it out of the flow would reshuffle every card underneath the
+ * pointer and invalidate the geometry the drag measured when it started —
+ * fading it says "this is the one in your hand" without moving anything.
+ */
+.dinner-dragging {
+  opacity: 0.4;
+}
+
+/* No text selection while a mouse drag crosses seven cards of it. */
+.calendar-dragging {
+  user-select: none;
+}
+
+/* The night it would land on. */
+.day-drop {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+}
+
+/*
+ * And where in that night. Drawn out of the flow, above the card the dinner
+ * would push down or below the last one when it's going to the bottom, so
+ * showing the indicator can't move the cards it was measured against.
+ */
+.dinner-drop-before::before,
+.dinner-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.dinner-drop-before::before {
+  top: -3px;
+}
+.dinner-drop-after::after {
+  bottom: -3px;
+}
+
+/* A move that failed, said out loud under the calendar. */
+.move-note {
+  margin: 0.25rem 0 0;
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
+/*
+ * Announced, not shown. The plan page moves a dinner in silence otherwise: the
+ * calendar redraws, which says everything to someone who can see it and nothing
+ * at all to someone who can't.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
