@@ -14,6 +14,13 @@ export default function SettingsPage() {
   const [pantryCount, setPantryCount] = useState<number | null>(null);
   const [bookmarklet, setBookmarklet] = useState("");
   const bmRef = useRef<HTMLAnchorElement>(null);
+  // Recipe library transfer (§2, §11). `importBusy` guards the double-click;
+  // the two message slots are kept apart because a failed import and a
+  // successful one that skipped everything read very differently.
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importErr, setImportErr] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -54,6 +61,67 @@ export default function SettingsPage() {
       body: JSON.stringify({ householdSize }),
     }).then((r) => r.json());
     setSavedSize(s.householdSize);
+  }
+
+  async function importLibrary(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || importBusy) return;
+
+    setImportBusy(true);
+    setImportMsg(null);
+    setImportErr(null);
+    try {
+      // Parsed here as well as on the server so a file that was never JSON
+      // fails on this side of the network, where the answer is instant.
+      let body: unknown;
+      try {
+        body = JSON.parse(await file.text());
+      } catch {
+        setImportErr(
+          "That file isn't valid JSON, so nothing in it could be read. If you edited it by hand, a missing comma or bracket is the usual cause.",
+        );
+        return;
+      }
+
+      const res = await fetch("/api/recipes/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        // The server explains itself in a sentence; passing it through beats
+        // paraphrasing it into something vaguer.
+        setImportErr(
+          data?.error ??
+            "The import didn't go through, and the server didn't say why. Nothing was changed.",
+        );
+        return;
+      }
+
+      const { imported = 0, skipped = 0, skippedNames = [] } = data ?? {};
+      const parts: string[] = [
+        imported === 0
+          ? "Nothing new to import."
+          : `Imported ${imported} ${imported === 1 ? "recipe" : "recipes"}.`,
+      ];
+      if (skipped) {
+        const names = (skippedNames as string[]).join(", ");
+        parts.push(
+          `${skipped} already in the library ${skipped === 1 ? "was" : "were"} skipped` +
+            (names ? `: ${names}${skipped > skippedNames.length ? ", …" : ""}.` : "."),
+        );
+      }
+      setImportMsg(parts.join(" "));
+    } catch {
+      setImportErr("Couldn't reach the server — nothing was imported.");
+    } finally {
+      setImportBusy(false);
+      // Cleared so picking the *same* file again still fires a change event —
+      // the obvious thing to do after fixing a rejected file is to re-pick it.
+      if (fileRef.current) fileRef.current.value = "";
+    }
   }
 
   const dirty = householdSize !== "" && householdSize !== savedSize;
@@ -128,6 +196,41 @@ export default function SettingsPage() {
         <p className="muted" style={{ fontSize: "0.85em" }}>
           Generate this from your Tailscale <code>https://…ts.net</code> address so
           the button points at the right place and works from other sites.
+        </p>
+      </div>
+
+      <div className="card">
+        <h2>Recipe library — export and import</h2>
+        <p className="muted">
+          Save every recipe to a single JSON file you can read, keep, or send to
+          another household. Importing adds the recipes in a file to this library;
+          anything already here is skipped rather than duplicated.
+        </p>
+        <p>
+          {/* A plain link: the route answers with Content-Disposition, so the
+              browser saves it under a dated name without any script here. */}
+          <a href="/api/recipes/export">Export the library →</a>
+        </p>
+        <p>
+          <label>
+            <span className="muted">Import a file: </span>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              disabled={importBusy}
+              onChange={importLibrary}
+            />
+          </label>
+        </p>
+        {importBusy && <p className="muted">Importing…</p>}
+        {importMsg && <p>{importMsg}</p>}
+        {importErr && <p style={{ color: "var(--accent)" }}>{importErr}</p>}
+        <p className="muted" style={{ fontSize: "0.85em" }}>
+          Photos aren't included — they're stored as raw image data (§2b), and
+          packing them in would turn a file you can open in a text editor into
+          tens of megabytes. Everything else travels: ingredients, method, tags,
+          servings and cook times.
         </p>
       </div>
 

@@ -3,6 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { estimateTotalMinutes } from "@/lib/durations";
 import { MAX_IMAGE_BYTES } from "@/lib/recipeImage";
 
 // Full recipe editor (§2). Edit name, source, servings, ingredients (add/remove
@@ -14,11 +15,28 @@ interface Ingredient {
   quantity: number | null;
   unit: string | null;
 }
+/**
+ * The typed total time, cleaned into what the API accepts: whole positive
+ * minutes, or null for "nobody has said". A blank box, a zero and a stray
+ * decimal all mean the same thing here — no claim — and clearing the field is
+ * a legitimate edit, not an error to swallow.
+ */
+function minutesFromInput(value: string): number | null {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 interface RecipeForm {
   name: string;
   source: string | null;
   instructions: string | null;
   statedServings: number;
+  /** Minutes, or null when nobody has said (§2). */
+  totalTimeMinutes: number | null;
+  /** Whether that number is our sum of the step timers rather than a stated
+   *  time. Carried through the form so saving an untouched recipe doesn't
+   *  quietly promote an estimate into a fact. */
+  totalTimeIsEstimate: boolean;
   ingredients: Ingredient[];
 }
 
@@ -51,6 +69,8 @@ export default function EditRecipePage({
           source: r.source,
           instructions: r.instructions,
           statedServings: r.statedServings,
+          totalTimeMinutes: r.totalTimeMinutes,
+          totalTimeIsEstimate: r.totalTimeIsEstimate,
           ingredients: r.ingredients.map((i: Ingredient) => ({
             name: i.name,
             quantity: i.quantity,
@@ -122,6 +142,16 @@ export default function EditRecipePage({
     await fetch(`/api/recipes/${id}/image`, { method: "DELETE" });
   }
 
+  /**
+   * Fill the time in from the step timers in the method (§2), flagged as the
+   * estimate it is. Recomputed from the textarea as you edit it, so rewriting
+   * the method offers you an updated number instead of leaving a stale one.
+   */
+  function useMethodEstimate() {
+    if (!form || methodEstimate == null) return;
+    setForm({ ...form, totalTimeMinutes: methodEstimate, totalTimeIsEstimate: true });
+  }
+
   function editIngredient(i: number, patch: Partial<Ingredient>) {
     if (!form) return;
     setForm({
@@ -162,6 +192,8 @@ export default function EditRecipePage({
 
   if (!form) return <p className="muted">Loading…</p>;
 
+  const methodEstimate = estimateTotalMinutes(form.instructions);
+
   return (
     <>
       <p>
@@ -190,6 +222,27 @@ export default function EditRecipePage({
               style={{ width: 64 }}
             />
           </label>
+          <label>
+            Total time{" "}
+            <input
+              type="number"
+              min={1}
+              value={form.totalTimeMinutes ?? ""}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  totalTimeMinutes: minutesFromInput(e.target.value),
+                  // A time somebody typed is a time somebody meant: a hand
+                  // edit promotes the value out of "estimate", so the recipe
+                  // page stops hedging it with "about" (§1 — review and
+                  // correct beats whatever we parsed).
+                  totalTimeIsEstimate: false,
+                })
+              }
+              style={{ width: 72 }}
+            />{" "}
+            min
+          </label>
           <label style={{ flex: 1 }}>
             Source link{" "}
             <input
@@ -200,6 +253,27 @@ export default function EditRecipePage({
             />
           </label>
         </div>
+        {/*
+          Where the number came from, said out loud, plus a way to get one for
+          the recipes that arrived without one (anything pasted as text, and
+          any page that declared no time). The sum is offered rather than
+          applied here: on the edit page you are the one deciding, and an
+          estimate you asked for is easier to trust than one that appeared.
+        */}
+        {form.totalTimeIsEstimate && form.totalTimeMinutes != null && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            Shown as “about {form.totalTimeMinutes} min” — our sum of the times in
+            the method, which usually runs long because steps overlap. Type a
+            time to state it outright.
+          </p>
+        )}
+        {methodEstimate != null && methodEstimate !== form.totalTimeMinutes && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            <button className="muted" onClick={useMethodEstimate}>
+              Estimate from the method (~{methodEstimate} min)
+            </button>
+          </p>
+        )}
       </div>
 
       <div className="card">

@@ -18,30 +18,44 @@ datasource db {
 
 /// Everything pasted-and-parsed is saved here and accumulates into the library.
 model Recipe {
-  id             String          @id @default(cuid())
-  name           String
+  id                  String           @id @default(cuid())
+  name                String
   /// Where it came from (URL or free text). Optional — pasted plans may lack one.
-  source         String?
+  source              String?
   /// The method/steps text, captured at parse time for the cooking view (§2).
-  instructions   String?
+  instructions        String?
   /// Raw captured page HTML (bookmarklet capture), kept so a recipe can be
   /// re-parsed later without re-fetching. Null for hand-pasted recipes.
-  sourceHtml     String?
+  sourceHtml          String?
   /// Servings the recipe is written for; scaling divides by this. (§4)
-  statedServings Int
+  statedServings      Int
+  /// Roughly how long the whole dish takes, in minutes — the field that answers
+  /// "what's quick on a Tuesday". Filled from the source page's schema.org
+  /// `totalTime` (or `prepTime` + `cookTime`) at import, otherwise estimated
+  /// from the step timers, and editable by hand like every other parsed field
+  /// (§1). Null when we have neither and nobody has typed one.
+  totalTimeMinutes    Int?
+  /// Whether `totalTimeMinutes` is a guess of ours rather than a number the
+  /// recipe stated. Adding up the step timers overstates a dish — steps overlap
+  /// and resting counts as cooking — so a summed time is shown as "about 40
+  /// min" while a declared one is shown flat. The flag has to be stored, not
+  /// recomputed at render, because the sum's inputs (the method text) can be
+  /// edited away while the number stays. Typing a time by hand clears it: a
+  /// human who wrote a number meant it.
+  totalTimeIsEstimate Boolean          @default(false)
   /// Where the photo came from — the source page's og:image / JSON-LD image.
   /// Kept for provenance and as a fallback when we hold no bytes of our own.
-  imageUrl       String?
+  imageUrl            String?
   /// The recipe photo itself, stored in the database like receipt photos (§7)
   /// so the app stays self-contained and works offline over Tailscale.
-  image          Bytes?
-  imageMime      String?
-  isFavorite     Boolean         @default(false)
-  tags           String[]        @default([])
-  ingredients    IngredientLine[]
-  dinnerSlots    DinnerSlot[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  image               Bytes?
+  imageMime           String?
+  isFavorite          Boolean          @default(false)
+  tags                String[]         @default([])
+  ingredients         IngredientLine[]
+  dinnerSlots         DinnerSlot[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
 
   @@index([isFavorite])
 }
@@ -75,6 +89,8 @@ model WeekPlan {
   /// The Monday of the week (date-only), unique per household.
   weekStart    DateTime      @unique @db.Date
   slots        DinnerSlot[]
+  /// The nights that were decided *not* to need a dinner (§3, §9b).
+  nightNotes   NightNote[]
   shoppingList ShoppingList?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -98,6 +114,53 @@ model DinnerSlot {
 
   @@index([weekPlanId, dayOfWeek])
   @@index([recipeId])
+}
+
+/// Why a night has no dinner on it (§3).
+///
+/// Three cases cover what a household actually says out loud, and OTHER with
+/// free text catches the rest rather than inviting a longer enum.
+enum NightNoteKind {
+  LEFTOVERS
+  OUT
+  OTHER
+}
+
+/// A night that was *decided* to need no dinner, rather than one nobody has got
+/// to yet (§3, §9b).
+///
+/// §3 has always allowed an empty night ("leftovers / eating out") but the plan
+/// couldn't tell that from a gap, so the weekly digest counted both and nagged
+/// "Fill in the 4 empty nights" at a household that eats leftovers every
+/// Wednesday — precisely the every-week nothing-to-say mail §9b exists to
+/// avoid. A note is the household saying "that one's settled".
+///
+/// Why a separate table rather than making DinnerSlot.recipeId nullable, which
+/// is the shorter-looking change: a null-recipe slot would leak into
+/// aggregateShoppingList (§5), the digest and the plan page, all of which read
+/// `slot.recipe` and assume a dinner is there. Their TypeScript types say
+/// `recipe: X | null`, but the schema has never permitted it since §3's
+/// multiple-dinners migration made recipeId required, so that null branch has
+/// never once run — turning it on would be turning on untested code in the
+/// three places a wrong answer is most expensive. A table of its own leaves
+/// every one of them alone: a note has no ingredients, so nothing to buy.
+model NightNote {
+  id         String        @id @default(cuid())
+  weekPlanId String
+  weekPlan   WeekPlan      @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
+  /// 0 = Monday … 6 = Sunday, matching DinnerSlot.dayOfWeek.
+  dayOfWeek  Int
+  kind       NightNoteKind
+  /// What it actually is, when the kind alone doesn't say — "Mormors fødselsdag",
+  /// "the lasagne from Sunday". Optional: most nights need no explaining.
+  text       String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  /// One decision per night. Unlike a dinner, a note doesn't stack — deciding
+  /// twice is changing your mind, which is an upsert, not a second row. Doubles
+  /// as the lookup index for reading a week's notes.
+  @@unique([weekPlanId, dayOfWeek])
 }
 
 // -----------------------------------------------------------------------------
@@ -136,6 +199,13 @@ model ShoppingListItem {
   checked        Boolean      @default(false)
   /// Pulled into the "Pantry — check you have these" section (§5).
   isPantry       Boolean      @default(false)
+  /// Typed onto the list by hand rather than derived from a planned dinner —
+  /// kitchen roll, nappies, the milk nobody cooks with. Regeneration rebuilds
+  /// the derived lines from scratch (§5); this flag marks the rows it must
+  /// carry across untouched instead. It's also what makes a line deletable:
+  /// removing a derived one would be a lie, since it comes straight back on
+  /// the next generation.
+  isManual       Boolean      @default(false)
 
   @@unique([shoppingListId, ingredientKey])
   @@index([shoppingListId])

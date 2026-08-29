@@ -6,7 +6,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { findDurations, formatClock } from "./durations.ts";
+import {
+  estimateTotalMinutes,
+  findDurations,
+  formatClock,
+  formatDurationMinutes,
+  parseIsoDuration,
+} from "./durations.ts";
 
 test("plain minutes, Danish and English", () => {
   assert.deepEqual(
@@ -72,4 +78,62 @@ test("the countdown reads like a clock", () => {
   assert.equal(formatClock(3600), "1:00:00");
   assert.equal(formatClock(5405), "1:30:05");
   assert.equal(formatClock(-3), "0:00");
+});
+
+// --- Whole-recipe time --------------------------------------------------------
+
+test("schema.org durations are read as the page wrote them", () => {
+  assert.equal(parseIsoDuration("PT1H30M"), 5400);
+  assert.equal(parseIsoDuration("PT45M"), 2700);
+  assert.equal(parseIsoDuration("PT2H"), 7200);
+  assert.equal(parseIsoDuration("PT30S"), 30);
+  assert.equal(parseIsoDuration("PT1H30M15S"), 5415);
+  // Overnight marinades and slow braises really are written this way.
+  assert.equal(parseIsoDuration("P1DT2H"), 93600);
+  // Sites that lower-case it, pad it, or put a fraction where ISO wouldn't.
+  assert.equal(parseIsoDuration("pt45m"), 2700);
+  assert.equal(parseIsoDuration("  PT45M  "), 2700);
+  assert.equal(parseIsoDuration("PT0.5H"), 1800);
+});
+
+test("anything that isn't a duration is null, never a throw", () => {
+  // A stranger's page fills this field; every one of these has been seen.
+  assert.equal(parseIsoDuration("45 minutes"), null);
+  assert.equal(parseIsoDuration(""), null);
+  assert.equal(parseIsoDuration("PT"), null); // matches the shape, says nothing
+  assert.equal(parseIsoDuration("P"), null);
+  assert.equal(parseIsoDuration("1H30M"), null); // no leading P
+  assert.equal(parseIsoDuration("PT1H30"), null); // unit missing
+  assert.equal(parseIsoDuration("-PT1H"), null);
+  assert.equal(parseIsoDuration("banana"), null);
+  // Months have no fixed length, so we decline rather than guess.
+  assert.equal(parseIsoDuration("P1M"), null);
+  // A declared zero is a template nobody filled in.
+  assert.equal(parseIsoDuration("PT0M"), null);
+});
+
+test("the fallback estimate sums the step timers, rounded to five minutes", () => {
+  // 20 + 25 = 45 exactly.
+  assert.equal(
+    estimateTotalMinutes("Steg 20 minutter.\nBag den 25 minutter."),
+    45,
+  );
+  // 8 (low end of the range) + 25 = 33 → "about 35", not a precise-looking 33.
+  assert.equal(
+    estimateTotalMinutes("Steg dem 8-10 minutter.\nLad den simre 25 minutter."),
+    35,
+  );
+  assert.equal(estimateTotalMinutes("Bag i 1 time og 30 minutter."), 90);
+  // A method with no timeable phrase gets no number at all.
+  assert.equal(estimateTotalMinutes("Bland det hele. Server straks."), null);
+  assert.equal(estimateTotalMinutes(null), null);
+  // Never rounds a real cook time away to nothing.
+  assert.equal(estimateTotalMinutes("Blancher i 30 sekunder."), 5);
+});
+
+test("a total time reads the way you'd say it", () => {
+  assert.equal(formatDurationMinutes(45), "45 min");
+  assert.equal(formatDurationMinutes(60), "1 h");
+  assert.equal(formatDurationMinutes(90), "1 h 30 min");
+  assert.equal(formatDurationMinutes(150), "2 h 30 min");
 });

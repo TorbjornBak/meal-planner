@@ -25,11 +25,12 @@ const LINKS = {
   recipe: (id) => `https://box.ts.net/recipes/${id}`,
 };
 
-/** Seven empty nights, with the given days filled in. */
-function nights(filled = {}) {
+/** Seven empty nights, with the given days filled in (and optionally decided). */
+function nights(filled = {}, notes = {}) {
   return Array.from({ length: 7 }, (_, dayOfWeek) => ({
     dayOfWeek,
     dinners: filled[dayOfWeek] ?? [],
+    note: notes[dayOfWeek] ?? null,
   }));
 }
 
@@ -189,4 +190,82 @@ test("one empty night is singular", () => {
 test("greets by name when there is one, and stays polite when there isn't", () => {
   assert.match(renderNewsletter(input()).text, /^Hi Torbjørn,/);
   assert.match(renderNewsletter(input({ name: null })).text, /^Hi,/);
+});
+
+// ---------------------------------------------------------------------------
+// Decided nights (§3, §9b)
+//
+// The bug these exist to hold shut: an empty night and a settled one used to be
+// the same thing to this mail, so a household whose Wednesday is leftovers by
+// standing arrangement was told to fill it in every week for as long as they
+// kept the arrangement. A nudge that is wrong every week is the mail §9b was
+// written not to send.
+// ---------------------------------------------------------------------------
+
+test("a decided night is not a night to fill in", () => {
+  const one = renderNewsletter(
+    input({ nights: nights({ 0: [{ name: "Lasagne" }] }) }),
+  );
+  // Monday cooked, the other six untouched.
+  assert.match(one.html, /Fill in the 6 empty nights/);
+
+  const settled = renderNewsletter(
+    input({
+      nights: nights(
+        { 0: [{ name: "Lasagne" }] },
+        { 2: { kind: "LEFTOVERS" }, 4: { kind: "OUT" } },
+      ),
+    }),
+  );
+  // Wednesday and Friday are decided, so only four nights are actually open.
+  assert.match(settled.html, /Fill in the 4 empty nights/);
+  assert.doesNotMatch(settled.html, /Fill in the 6 empty nights/);
+});
+
+test("a fully decided week asks for nothing", () => {
+  const notes = {};
+  for (let d = 1; d < 7; d += 1) notes[d] = { kind: "OUT" };
+  const composed = renderNewsletter(
+    input({ nights: nights({ 0: [{ name: "Lasagne" }] }, notes) }),
+  );
+  assert.match(composed.html, /Open the plan/);
+  assert.doesNotMatch(composed.html, /Fill in/);
+  assert.match(composed.text, /^Plan: /m);
+  // The preheader should stop counting gaps and report what's planned instead.
+  assert.doesNotMatch(composed.html, /still to fill/);
+});
+
+test("both halves of the mail say what the night was decided to be", () => {
+  const composed = renderNewsletter(
+    input({
+      nights: nights(
+        {},
+        {
+          2: { kind: "LEFTOVERS", text: "the lasagne from Sunday" },
+          4: { kind: "OUT" },
+          5: { kind: "OTHER", text: "Fasting" },
+        },
+      ),
+    }),
+  );
+
+  // §9b requires plain text alongside the HTML, and the two must agree.
+  for (const body of [composed.html, composed.text]) {
+    assert.match(body, /Leftovers — the lasagne from Sunday/);
+    assert.match(body, /Eating out/);
+    assert.match(body, /Fasting/);
+  }
+  // An undecided night still reads as a gap in the text copy.
+  assert.match(composed.text, /Monday 24 Aug: —/);
+  assert.match(composed.html, /Nothing planned/);
+});
+
+test("a week of nothing but decisions is still worth sending", () => {
+  const notes = {};
+  for (let d = 0; d < 7; d += 1) notes[d] = { kind: "OUT" };
+  // Nothing is cooking, but the household planned that on purpose — silence
+  // would read as the mail having broken.
+  assert.equal(isWorthSending(input({ nights: nights({}, notes) })), true);
+  // A week nobody has touched still says nothing, and still isn't sent.
+  assert.equal(isWorthSending(input()), false);
 });

@@ -2,22 +2,19 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
+import { mondayOf } from "./week";
 
 // Weekly dinner plan (§3, §4). A night can hold several dinners; an empty night
 // simply has no slots.
-
-/** Monday (UTC, date-only) of the week containing `d`. */
-function mondayOf(d: Date): Date {
-  const day = d.getUTCDay(); // 0 = Sun
-  const diff = (day + 6) % 7; // days since Monday
-  const monday = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diff),
-  );
-  return monday;
-}
+//
+// One dinner at a time is the whole of this file. Filling a week from the week
+// before it is a bulk operation on a different subject, and lives next door in
+// copy/route.ts; marking a night as decided-to-be-empty is a different subject
+// again, and lives in note/route.ts.
 
 // GET /api/plan?weekStart=YYYY-MM-DD — fetch (or create) a week's plan with its
-// dinner slots, ordered by day then position. Defaults to the current week.
+// dinner slots, ordered by day then position, and any night notes (§3, §9b).
+// Defaults to the current week.
 export async function GET(req: Request) {
   const raw = new URL(req.url).searchParams.get("weekStart");
   const weekStart = mondayOf(raw ? new Date(raw) : new Date());
@@ -31,6 +28,10 @@ export async function GET(req: Request) {
         orderBy: [{ dayOfWeek: "asc" }, { position: "asc" }],
         include: { recipe: { omit: OMIT_RECIPE_BLOBS } },
       },
+      // At most seven rows, and the calendar needs every one of them to tell a
+      // decided night from an unplanned one — so they ride along with the week
+      // rather than costing the page a second request.
+      nightNotes: true,
     },
   });
 
@@ -45,6 +46,12 @@ const AddInput = z.object({
 
 // POST /api/plan — add a dinner to a night. The new dinner lands after any
 // dinners already on that night.
+//
+// A night note (see note/route.ts) is left alone even though a dinner arguably
+// supersedes it: deleting one here would be a destructive side effect of a
+// request that didn't mention it, invisible in the response and un-undoable.
+// The calendar keeps showing a note next to the dinners instead, so a stale one
+// is something you can see and clear rather than something we guessed about.
 export async function POST(req: Request) {
   const parsed = AddInput.safeParse(await req.json());
   if (!parsed.success) {

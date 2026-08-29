@@ -27,6 +27,12 @@ const PatchInput = z.object({
   source: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   statedServings: z.number().int().positive().optional(),
+  // How long it takes (§2). Nullable so a wrong parse can be cleared rather
+  // than only overwritten, and `totalTimeIsEstimate` rides along with it: the
+  // edit page clears the flag when a human types a time and sets it when they
+  // ask for the from-the-method sum, so the two always move together.
+  totalTimeMinutes: z.number().int().positive().nullable().optional(),
+  totalTimeIsEstimate: z.boolean().optional(),
   isFavorite: z.boolean().optional(),
   tags: z.array(z.string()).optional(),
   // When present, fully replaces the recipe's ingredient lines.

@@ -1,3 +1,4 @@
+import { estimateTotalMinutes } from "./durations";
 import { prisma } from "./prisma";
 import { extractRecipeImageUrl, parseRecipeHtml } from "./html";
 import { fetchImage, resolvePublicUrl } from "./image";
@@ -29,6 +30,17 @@ export async function createRecipeFromHtml(
   const imageUrl = rawImageUrl ? resolvePublicUrl(rawImageUrl, pageUrl) : null;
   const image = imageUrl ? await fetchImage(imageUrl) : null;
 
+  // How long it takes (§2), best source first: the page's own schema.org
+  // totalTime (or prepTime + cookTime), which the parser has already read;
+  // failing that, the step timers in the method added up. The second is a
+  // guess and gets flagged as one, so the UI can say "about 40 min" instead of
+  // passing our arithmetic off as the recipe's own claim. Either way it lands
+  // on the edit page you're about to be dropped on (§1), where a human can
+  // overrule it.
+  const totalTimeMinutes =
+    parsed.totalTimeMinutes ?? estimateTotalMinutes(parsed.instructions);
+  const totalTimeIsEstimate = totalTimeMinutes != null && parsed.totalTimeMinutes == null;
+
   return prisma.recipe.create({
     data: {
       name: parsed.name,
@@ -36,6 +48,8 @@ export async function createRecipeFromHtml(
       instructions: parsed.instructions ?? null,
       sourceHtml: html,
       statedServings: parsed.statedServings,
+      totalTimeMinutes,
+      totalTimeIsEstimate,
       imageUrl,
       // Prisma's Bytes field wants a plain Uint8Array, not a Buffer.
       image: image ? new Uint8Array(image.bytes) : null,

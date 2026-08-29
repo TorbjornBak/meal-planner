@@ -42,6 +42,9 @@ export async function gatherDigest(weekStart: Date, now = new Date()): Promise<D
           orderBy: [{ dayOfWeek: "asc" }, { position: "asc" }],
           include: { recipe: { select: { id: true, name: true } } },
         },
+        // The nights the household has already settled (§3). Without these the
+        // digest can't tell a decision from a gap, and nags about both.
+        nightNotes: { select: { dayOfWeek: true, kind: true, text: true } },
       },
     }),
     prisma.recipe.findMany({
@@ -53,12 +56,19 @@ export async function gatherDigest(weekStart: Date, now = new Date()): Promise<D
 
   // Always seven nights, whether or not the week exists yet — an empty night
   // is information ("nothing planned"), not something to omit.
-  const nights: DigestNight[] = Array.from({ length: 7 }, (_, dayOfWeek) => ({
-    dayOfWeek,
-    dinners: (plan?.slots ?? [])
-      .filter((s) => s.dayOfWeek === dayOfWeek && s.recipe)
-      .map((s) => ({ name: s.recipe!.name, servings: s.servingsOverride })),
-  }));
+  const nights: DigestNight[] = Array.from({ length: 7 }, (_, dayOfWeek) => {
+    // At most one, enforced by the (weekPlanId, dayOfWeek) unique index.
+    const note = (plan?.nightNotes ?? []).find((n) => n.dayOfWeek === dayOfWeek);
+    return {
+      dayOfWeek,
+      dinners: (plan?.slots ?? [])
+        .filter((s) => s.dayOfWeek === dayOfWeek && s.recipe)
+        .map((s) => ({ name: s.recipe!.name, servings: s.servingsOverride })),
+      // Narrowed to what the wording needs, so the mail can't come to depend on
+      // a database row's shape.
+      note: note ? { kind: note.kind, text: note.text } : null,
+    };
+  });
 
   return { weekStart, nights, newRecipes: recipes };
 }

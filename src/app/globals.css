@@ -442,11 +442,117 @@ table {
 }
 
 /* Full-width so the whole bottom of a card is a tap target on a phone. */
-.day-picker {
+.day-add {
   width: 100%;
   min-height: 36px;
   padding: 0.3rem 0.4rem;
   font-size: 16px;
+  color: var(--muted);
+}
+
+/* --- Recipe picker (plan page) --------------------------------------------- */
+
+/*
+ * One dialog serves all seven nights. `[open]` carries the display, because a
+ * bare `display: flex` here would beat the UA's own
+ * `dialog:not([open]) { display: none }` and leave the picker on screen for
+ * good.
+ */
+.picker-dialog {
+  width: min(30rem, calc(100vw - 1.5rem));
+  max-height: min(30rem, calc(100dvh - 4rem));
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--fg);
+  overflow: hidden;
+}
+.picker-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.picker-dialog::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+/*
+ * Everything visible sits in here rather than straight in the <dialog>, so the
+ * only clicks that reach the dialog element are backdrop clicks. Otherwise the
+ * margin around the search box counts as the dialog, and brushing it dismisses
+ * the picker.
+ */
+.picker-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Title and search box stay put; only the results below them scroll. */
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.75rem 0;
+}
+.picker-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.picker-input {
+  margin: 0.6rem 0.75rem;
+}
+
+.picker-results {
+  flex: 1;
+  /* Without this a flex item refuses to shrink below its content, and the
+     list grows the dialog instead of scrolling inside it. */
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0;
+  padding: 0 0 0.4rem;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+.picker-option {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  /* Same 44px as a button: this is the tap target on a phone. */
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+/* Hover and the arrow-key highlight are one state, so only ever one row is lit. */
+.picker-option-on {
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+}
+.picker-option-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+/* Why the recipe turned up: the ingredients the query actually matched. */
+.picker-why {
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+.picker-empty {
+  margin: 0;
+  padding: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * Focus stays in the search box the whole time the picker is open, so its ring
+ * is the only thing telling you where your keystrokes are going. The rest of
+ * the app leaves rings to the browser; here they're made unmissable.
+ */
+.picker-dialog :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @media (max-width: 480px) {
@@ -465,4 +571,76 @@ table {
   .day {
     min-height: 0;
   }
+}
+
+/* Week actions (§3) — the row under the calendar's week header: paging back to
+   today, and copying last week's dinners in. Kept out of .week-header itself so
+   that stays a symmetric ←/title/→ line; wraps on a phone rather than squeezing
+   the buttons and the copy result onto one line. */
+.week-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+/* --- Decided nights (plan page, §3/§9b) ------------------------------------ */
+/*
+ * A night the household settled without cooking. Styled apart from `.day-empty`
+ * on purpose: an undecided night is a gap the weekly digest still nudges about,
+ * a decided one is a plan, and the calendar has to show that difference at a
+ * glance or the whole feature is invisible.
+ */
+.day-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 0.85em;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+}
+
+.day-note-clear {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.1em;
+  line-height: 1;
+  /* A 44px target would dominate a calendar cell; 28 is still a comfortable
+     thumb on the phones this is planned on. */
+  min-width: 28px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.day-note-clear:hover {
+  color: var(--fg);
+}
+
+.day-decide {
+  display: flex;
+  gap: 6px;
+}
+
+.day-decide button {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 0.78em;
+  color: var(--muted);
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.day-decide button:hover {
+  color: var(--fg);
+  border-style: solid;
 }

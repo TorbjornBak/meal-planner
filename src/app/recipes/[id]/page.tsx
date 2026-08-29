@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { formatDurationMinutes } from "@/lib/durations";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS, recipeImageSrc } from "@/lib/recipeImage";
 import { CookingMode } from "./CookingMode";
@@ -82,6 +83,28 @@ export default async function RecipeDetailPage({
       </h1>
       <p className="muted">
         Serves {recipe.statedServings}
+        {recipe.totalTimeMinutes != null ? (
+          <>
+            {" · "}
+            {/*
+              An estimate wears its "about" in the copy, not just in a tooltip:
+              a time we summed out of the step timers overstates the dish
+              (steps overlap, resting counts), and the whole point of showing a
+              time is that you can plan a Tuesday around it. A source-declared
+              time is stated flat, because the recipe itself said so.
+            */}
+            <span
+              title={
+                recipe.totalTimeIsEstimate
+                  ? "Our estimate, from adding up the times in the method — steps overlap, so it usually runs shorter. Correct it on the edit page."
+                  : "As the source page states it."
+              }
+            >
+              {recipe.totalTimeIsEstimate ? "about " : ""}
+              {formatDurationMinutes(recipe.totalTimeMinutes)}
+            </span>
+          </>
+        ) : null}
         {recipe.source ? (
           <>
             {" · "}
