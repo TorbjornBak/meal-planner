@@ -165,10 +165,19 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   nothing is one people learn to ignore.
 - **Sent over your own SMTP server**, not a mail API — no account to sign up
   for, no key to leak (§12).
-- **No scheduler inside the app.** Background jobs stay deferred; the app just
-  exposes `POST /api/newsletter/send`, authenticated with a bearer token, and
-  **cron on the host calls it**. Delivery is recorded per member per week, so a
-  cron that fires twice or a retried request can't send twice.
+- **The app schedules it**, on a timer started from Next's `instrumentation`
+  hook. This began as host cron calling `POST /api/newsletter/send`, and the
+  crontab turned out to be the least reliable part of the system: unversioned,
+  missing from a rebuilt box, and silent when its command was wrong. The
+  endpoint stays, for re-running a week by hand.
+- **Due, not fired.** The schedule asks "should this week's digest have gone out
+  by now?" rather than firing at an instant, so a box that was off at the send
+  hour sends when it comes back, and a delivery that failed is retried on the
+  next tick. A missed cron firing was simply lost.
+- **The send hour is a wall clock** in a configured zone, so it doesn't move
+  when the clocks do.
+- Delivery is recorded per member per week, so a re-tick, a restart or a
+  retried request can't send twice.
 - **Every mail carries plain text alongside the HTML**, and a working
   **one-click unsubscribe** — both the footer link and the `List-Unsubscribe`
   header the mail client's own button uses. Unsubscribing only clears the digest
@@ -229,9 +238,9 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Bulk or automated crawling of source sites — no crawler, no background jobs,
   no re-fetching on a schedule. Single-page import of a URL *you* paste is
   supported (§1); it's a best-effort fetch of one page you chose, with the
-  bookmarklet as the fallback when a site blocks it. The weekly newsletter
-  doesn't change this: the app runs no scheduler, it exposes an endpoint that
-  host cron calls (§9b).
+  bookmarklet as the fallback when a site blocks it. The weekly digest's timer
+  (§9b) is the one exception, and a narrow one: it fetches nothing and calls
+  nobody, it only asks the database whether this week's mail is owed.
 - Line-item spend and item-level cost attribution. Receipts are OCR'd for their
   total only (§7); nothing reads the individual products off them.
 - Budget targets and over-budget alerts.
