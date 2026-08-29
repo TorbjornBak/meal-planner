@@ -101,3 +101,81 @@ export function formatClock(seconds: number): string {
   const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
   return `${h > 0 ? `${h}:` : ""}${mm}:${String(sec).padStart(2, "0")}`;
 }
+
+// --- Whole-recipe time (§2) ---------------------------------------------------
+
+// An ISO-8601 duration as schema.org writes it: "PT1H30M", "PT45M", "P1DT2H".
+// Deliberately narrow — days, hours, minutes, seconds. ISO's `M` means *months*
+// before the `T` and minutes after it, and a month has no fixed length, so a
+// page that says "P1M" gets null rather than a guess. The `i` flag is for the
+// sites that lower-case it ("pt45m"); the optional decimals are for the ones
+// that write "PT0.5H", which ISO only allows on the final component but which
+// pages emit anyway.
+const ISO_DURATION_RE =
+  /^P(?:(\d+(?:[.,]\d+)?)D)?(?:T(?:(\d+(?:[.,]\d+)?)H)?(?:(\d+(?:[.,]\d+)?)M)?(?:(\d+(?:[.,]\d+)?)S)?)?$/i;
+
+/**
+ * A schema.org duration in seconds, or null if the string isn't one.
+ *
+ * This is how a recipe page states its own `totalTime` / `prepTime` /
+ * `cookTime`, and it is the honest number: the site's claim about its own
+ * recipe rather than something we inferred. Still deterministic and
+ * in-process (§1, §12) — it's a regex over a string the page already gave us.
+ *
+ * Seconds, like everything else in this module, even though every caller wants
+ * minutes — one unit through the file is worth one division at the edge.
+ *
+ * Never throws: the input is whatever a stranger's page put in the field, so
+ * anything unparseable (empty, "45 minutes", a bare "P", a zero duration)
+ * comes back null and the caller falls through to its next-best source.
+ */
+export function parseIsoDuration(value: string): number | null {
+  const m = value.trim().match(ISO_DURATION_RE);
+  if (!m) return null;
+  const [, days, hours, minutes, seconds] = m;
+  // "P" and "PT" match the pattern but say nothing.
+  if (!days && !hours && !minutes && !seconds) return null;
+
+  const n = (token: string | undefined) => (token ? Number(token.replace(",", ".")) : 0);
+  const total = n(days) * 86400 + n(hours) * 3600 + n(minutes) * 60 + n(seconds);
+  // A declared zero ("PT0M") is a field somebody left in the template.
+  return total > 0 ? Math.round(total) : null;
+}
+
+/**
+ * Roughly how long a recipe takes, read off its own method text by adding up
+ * every step timer (§2). The last resort when the source page declared no time
+ * — and a genuine guess, not a measurement:
+ *
+ *   - steps overlap (the sauce simmers while the pasta boils),
+ *   - resting and marinating time counts as cooking time here,
+ *   - knife work, and anything a step doesn't put a number on, counts as zero.
+ *
+ * The first two push the sum up, the third pushes it down, and the first two
+ * usually win — so this systematically *overstates* a recipe. Callers must
+ * mark it as an estimate (Recipe.totalTimeIsEstimate) and present it with an
+ * "about", never as a fact.
+ *
+ * Rounded to five minutes for the same reason: summing 8-10 minutes here and
+ * 25 there to arrive at "43 min" would dress a guess up as arithmetic.
+ * Returns null when the method carries no timeable phrase at all — no number
+ * beats a made-up one.
+ */
+export function estimateTotalMinutes(
+  instructions: string | null | undefined,
+): number | null {
+  if (!instructions) return null;
+  const seconds = findDurations(instructions).reduce((total, d) => total + d.seconds, 0);
+  if (seconds <= 0) return null;
+  return Math.max(5, Math.round(seconds / 60 / 5) * 5);
+}
+
+/** "45 min", "1 h", "1 h 30 min" — a whole-recipe time as you'd say it aloud. */
+export function formatDurationMinutes(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  if (h === 0) return `${rest} min`;
+  if (rest === 0) return `${h} h`;
+  return `${h} h ${rest} min`;
+}

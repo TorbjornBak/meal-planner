@@ -1,3 +1,4 @@
+import { parseIsoDuration } from "./durations";
 import {
   parseIngredientLine,
   parseRecipeText,
@@ -220,7 +221,39 @@ function mapRecipeNode(node: Record<string, unknown>): ParsedRecipe {
     statedServings,
     ingredients,
     instructions: mapInstructions(node.recipeInstructions) || null,
+    totalTimeMinutes: declaredTotalMinutes(node),
   };
+}
+
+/**
+ * How long the page says the dish takes, in minutes (§2).
+ *
+ * schema.org gives us `totalTime` and, separately, `prepTime` + `cookTime`.
+ * `totalTime` wins where it exists — it is the site's own answer, not our sum
+ * — and the two parts are added only as a stand-in for a missing whole. Some
+ * sites publish only one of the parts; half a recipe's time is still a better
+ * answer than none, and it errs *short*, which is the safe direction for a
+ * number a human is about to eyeball on the edit page (§1).
+ *
+ * `performTime` is schema.org's HowTo name for the same thing as `cookTime`,
+ * and a handful of recipe plugins emit it.
+ *
+ * Everything is an ISO-8601 duration string; anything unparseable falls out as
+ * null and the caller drops through to estimating from the method text.
+ */
+function declaredTotalMinutes(node: Record<string, unknown>): number | null {
+  const iso = (v: unknown) => {
+    const str = asString(Array.isArray(v) ? v[0] : v);
+    return str ? parseIsoDuration(str) : null;
+  };
+
+  const total = iso(node.totalTime);
+  if (total != null) return Math.round(total / 60);
+
+  const parts = iso(node.prepTime) ?? 0;
+  const cook = iso(node.cookTime) ?? iso(node.performTime) ?? 0;
+  const sum = parts + cook;
+  return sum > 0 ? Math.round(sum / 60) : null;
 }
 
 function mapInstructions(value: unknown): string {
@@ -281,7 +314,36 @@ export function extractMicrodataRecipe(html: string): ParsedRecipe | null {
     statedServings,
     ingredients,
     instructions: steps.length ? steps.join("\n") : null,
+    totalTimeMinutes: microdataTotalMinutes(html),
   };
+}
+
+/**
+ * The microdata equivalent of `declaredTotalMinutes` — same order of trust,
+ * different markup. Microdata writes a duration on a `<time itemprop="totalTime"
+ * datetime="PT45M">45 min</time>` or a void `<meta itemprop="cookTime"
+ * content="PT20M">`, so the machine-readable value lives in an *attribute*,
+ * not in the element's text (which is prose like "45 min" and none of our
+ * business). Reading the attribute off the open tag also sidesteps `itemprops`,
+ * which needs a closing tag a `<meta>` never has.
+ */
+function microdataTotalMinutes(html: string): number | null {
+  const prop = (name: string): number | null => {
+    const tag = html.match(
+      new RegExp(`<\\w+\\b[^>]*\\bitemprop=["']${name}["'][^>]*>`, "i"),
+    );
+    if (!tag) return null;
+    const value =
+      tag[0].match(/\bdatetime=["']([^"']+)["']/i) ??
+      tag[0].match(/\bcontent=["']([^"']+)["']/i);
+    return value ? parseIsoDuration(decodeEntities(value[1])) : null;
+  };
+
+  const total = prop("totalTime");
+  if (total != null) return Math.round(total / 60);
+
+  const sum = (prop("prepTime") ?? 0) + (prop("cookTime") ?? 0);
+  return sum > 0 ? Math.round(sum / 60) : null;
 }
 
 /**
@@ -378,6 +440,10 @@ export function extractInertiaRecipe(html: string): ParsedRecipe | null {
     statedServings,
     ingredients,
     instructions: parts.length ? parts.join("\n") : null,
+    // The blob's own time fields are bespoke and undocumented; rather than
+    // guess at a key name we leave this null and let the caller estimate from
+    // the steps, honestly labelled as an estimate.
+    totalTimeMinutes: null,
   };
 }
 

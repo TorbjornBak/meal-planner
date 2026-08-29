@@ -14,6 +14,7 @@
 // Imported relatively, with its extension, so `npm test` can run this module
 // straight through Node — the `@/` alias only exists inside the bundler.
 import { PALETTE, esc, layout, type Composed } from "./emailLayout.ts";
+import { nightNoteLabel, type NightNote } from "./nightNotes.ts";
 
 export interface DigestDinner {
   name: string;
@@ -25,6 +26,12 @@ export interface DigestNight {
   /** 0 = Monday … 6 = Sunday, matching DinnerSlot.dayOfWeek. */
   dayOfWeek: number;
   dinners: DigestDinner[];
+  /**
+   * The household's decision that this night needs no dinner (§3) — leftovers,
+   * eating out. Absent means nobody has got to it yet, which is the only kind
+   * of night this mail should be nudging about.
+   */
+  note?: NightNote | null;
 }
 
 export interface DigestRecipe {
@@ -119,7 +126,26 @@ function plural(n: number, one: string, many: string): string {
  * send is skipped rather than delivered empty.
  */
 export function isWorthSending(input: NewsletterInput): boolean {
-  return input.newRecipes.length > 0 || input.nights.some((n) => n.dinners.length > 0);
+  return (
+    input.newRecipes.length > 0 ||
+    // A decided night is a planned night. A household that settles a whole week
+    // as leftovers and eating out has planned it, and silence would read as the
+    // mail having broken rather than as there being nothing to say.
+    input.nights.some((n) => n.dinners.length > 0 || n.note)
+  );
+}
+
+/**
+ * A night nobody has got to yet — the only thing this mail asks anyone to fix.
+ *
+ * §3 always let a night be empty on purpose, but until notes existed the plan
+ * couldn't tell that from a gap, so the digest counted both and told a
+ * household whose Wednesday is leftovers by standing arrangement to fill it in,
+ * every week, forever. A nudge that is wrong every week is exactly the mail
+ * §9b set out not to send.
+ */
+function isUndecided(night: DigestNight): boolean {
+  return night.dinners.length === 0 && !night.note;
 }
 
 function dinnerLabel(d: DigestDinner): string {
@@ -130,7 +156,7 @@ function dinnerLabel(d: DigestDinner): string {
 export function renderNewsletter(input: NewsletterInput): Composed {
   const range = weekRangeLabel(input.weekStart);
   const planned = input.nights.reduce((n, night) => n + night.dinners.length, 0);
-  const emptyNights = input.nights.filter((n) => n.dinners.length === 0).length;
+  const emptyNights = input.nights.filter(isUndecided).length;
   const hello = input.name ? `Hi ${input.name},` : "Hi,";
 
   const subject = `Dinners for ${range}${
@@ -149,7 +175,10 @@ export function renderNewsletter(input: NewsletterInput): Composed {
     .map((night) => {
       const date = shortDate(dateOfNight(input.weekStart, night.dayOfWeek));
       const label = `${DAY_NAMES[night.dayOfWeek]} ${date}`;
-      if (night.dinners.length === 0) return `  ${label}: —`;
+      // A decision reads as itself; only a genuine gap gets the dash.
+      if (night.dinners.length === 0) {
+        return `  ${label}: ${night.note ? nightNoteLabel(night.note) : "—"}`;
+      }
       return `  ${label}: ${night.dinners.map(dinnerLabel).join(", ")}`;
     })
     .join("\n");
@@ -177,7 +206,11 @@ Don't want these? Unsubscribe: ${input.links.unsubscribe}`;
       const date = shortDate(dateOfNight(input.weekStart, night.dayOfWeek));
       const empty = night.dinners.length === 0;
       const body = empty
-        ? `<span style="color:${PALETTE.muted};">Nothing planned</span>`
+        ? // "Nothing planned" is only true of a night nobody has decided. Saying
+          // it of a settled one tells the household its own plan doesn't count.
+          `<span style="color:${PALETTE.muted};">${
+            night.note ? esc(nightNoteLabel(night.note)) : "Nothing planned"
+          }</span>`
         : night.dinners
             .map(
               (d) =>

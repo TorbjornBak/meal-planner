@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
+import { searchRecipes } from "@/lib/recipeSearch";
+import { formatDurationMinutes } from "@/lib/durations";
 
 // Recipe library (§2) — browse, favorite, rename, delete; filter by ingredient
 // (tag-style); and add a recipe straight onto this week's meal plan (§3).
@@ -26,6 +28,77 @@ function sourceLabel(source: string): string {
   }
 }
 
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The Monday of the week we are in, as the same UTC-midnight instant the API
+ * measures weeks in (`WeekPlan.weekStart` is a date-only column holding a
+ * Monday, §3).
+ *
+ * Built from the *local* calendar date and then read as UTC — the same trick
+ * the plan page's `mondayKey` uses. Taking `getUTCDate()` of a local `new
+ * Date()` would put a Copenhagen evening on tomorrow's date half the year, and
+ * every Sunday night the whole library would age by a week.
+ */
+function thisMondayUtc(now: Date): number {
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return today - ((now.getDay() + 6) % 7) * 86_400_000;
+}
+
+/**
+ * "Last cooked 3 weeks ago" — the answer to "what haven't we made in ages",
+ * which the app has always known and never said out loud.
+ *
+ * Both ends are exact UTC midnights, so the division is whole and the rounding
+ * is only belt-and-braces. A week still to come is a dinner already booked, not
+ * one cooked, and says so: without that, next week's plan would read as "last
+ * cooked -1 weeks ago".
+ *
+ * Anything past a year collapses into one phrase. "Last cooked 137 weeks ago"
+ * is arithmetic nobody can feel, and the sort below still keeps the oldest of
+ * them first.
+ */
+function lastCookedLabel(lastCookedOn: string | null, thisMonday: number): string {
+  if (!lastCookedOn) return "Never cooked";
+  const weeks = Math.round((thisMonday - Date.parse(lastCookedOn)) / WEEK_MS);
+  if (weeks < -1) return `On the plan in ${-weeks} weeks`;
+  if (weeks === -1) return "On next week's plan";
+  if (weeks === 0) return "Last cooked this week";
+  if (weeks === 1) return "Last cooked last week";
+  if (weeks >= 52) return "Last cooked over a year ago";
+  return `Last cooked ${weeks} weeks ago`;
+}
+
+/** The exact week behind the label, for the tooltip. Read as UTC because that
+ * is how the week was stored — rendering it locally would show the Sunday. */
+function weekOfLabel(lastCookedOn: string): string {
+  return `Week of ${new Date(lastCookedOn).toLocaleDateString(undefined, {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })}`;
+}
+
+/**
+ * How long the dish takes, phrased as honestly as it was arrived at (§2).
+ * A time the source page declared is stated flat; one we reached by adding up
+ * the step timers is hedged with "about", because summing overlapping steps
+ * overstates a recipe — the rule `Recipe.totalTimeIsEstimate` exists to carry.
+ */
+function cookTimeLabel(recipe: Recipe): string | null {
+  if (recipe.totalTimeMinutes == null) return null;
+  const time = formatDurationMinutes(recipe.totalTimeMinutes);
+  return recipe.totalTimeIsEstimate ? `about ${time}` : time;
+}
+
+/**
+ * How the list is ordered. An explicit control rather than a smart default:
+ * favourites-first is the shelf you reach for most days, and staleness is a
+ * question you ask deliberately, when the week won't fill itself.
+ */
+type SortOrder = "favorites" | "leastRecent";
+
 interface Ingredient {
   name: string;
 }
@@ -39,6 +112,13 @@ interface Recipe {
   /// lives. Either one means there's something to show.
   imageMime: string | null;
   imageUrl: string | null;
+  /// Whole-dish time in minutes, and whether it is our own sum of the step
+  /// timers rather than a number the source stated. Null when nobody knows.
+  totalTimeMinutes: number | null;
+  totalTimeIsEstimate: boolean;
+  /// The Monday of the most recent week this recipe was on the plan (§3), as
+  /// the API's ISO string; null means it has never been on one.
+  lastCookedOn: string | null;
   ingredients: Ingredient[];
 }
 interface Slot {
@@ -58,7 +138,12 @@ export default function RecipesPage() {
   const [editName, setEditName] = useState("");
   const [filters, setFilters] = useState<string[]>([]);
   const [filterInput, setFilterInput] = useState("");
+  const [sort, setSort] = useState<SortOrder>("favorites");
   const [added, setAdded] = useState<Record<string, string>>({});
+
+  // Read once per render rather than per row, so a list rendered across
+  // midnight can't age half its recipes by a week mid-paint.
+  const thisMonday = useMemo(() => thisMondayUtc(new Date()), []);
 
   async function loadRecipes() {
     setRecipes(await fetch("/api/recipes").then((r) => r.json()));
@@ -78,16 +163,41 @@ export default function RecipesPage() {
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [recipes]);
 
-  // AND filter: a recipe must contain every filter term (substring match).
+  // AND filter: a recipe must match every chip. The matching itself is
+  // `searchRecipes` (§2), the same function the plan page's picker uses, so
+  // "blomkål" means the same thing on both screens — including the Danish
+  // folding, which is why a chip typed "blomkaal" now works too.
+  //
+  // One chip per pass rather than one query of all of them: `searchRecipes`
+  // splits a query on whitespace and ANDs the words separately, but a chip is
+  // one phrase — "hakket oksekød" must keep matching as it always did.
   const filtered = useMemo(() => {
     if (!recipes) return [];
-    if (filters.length === 0) return recipes;
-    return recipes.filter((r) =>
-      filters.every((f) =>
-        r.ingredients.some((i) => i.name.toLowerCase().includes(f.toLowerCase())),
-      ),
-    );
+    let rows = recipes;
+    for (const f of filters) rows = searchRecipes(rows, f).map((m) => m.recipe);
+    return rows;
   }, [recipes, filters]);
+
+  // "Favourites first" is the order the API already sent (favourites, then
+  // name), so the default costs nothing and the list you know stays put.
+  //
+  // "Least recently cooked" puts never-cooked recipes at the very top: a recipe
+  // nobody has ever made is staler than any recipe we made once, and it is the
+  // one most in need of attention — that is the whole point of the sort. It
+  // falls out of treating "never" as infinitely long ago rather than as a
+  // missing value to be shuffled to the end. Ties — a week that held several
+  // dinners — break by name, so the order is stable between renders.
+  const sorted = useMemo(() => {
+    if (sort === "favorites") return filtered;
+    return [...filtered].sort((a, b) => {
+      const at = a.lastCookedOn ? Date.parse(a.lastCookedOn) : -Infinity;
+      const bt = b.lastCookedOn ? Date.parse(b.lastCookedOn) : -Infinity;
+      // Compared, never subtracted: -Infinity minus -Infinity is NaN, and a
+      // NaN comparator silently leaves the never-cooked ones wherever they lay.
+      if (at !== bt) return at < bt ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [filtered, sort]);
 
   function addFilter() {
     const f = filterInput.trim();
@@ -146,7 +256,8 @@ export default function RecipesPage() {
       <div className="card">
         <h2>Find by ingredient</h2>
         <p className="muted">
-          Add ingredients to narrow the list to recipes that contain all of them.
+          Add ingredients to narrow the list to recipes that contain all of them
+          — a word from the recipe's name works too.
         </p>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {filters.map((f) => (
@@ -189,12 +300,34 @@ export default function RecipesPage() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="muted">
           {filters.length ? "No recipes match those ingredients." : "Nothing saved yet."}
         </p>
       ) : (
-        filtered.map((r) => (
+        <>
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            justifyContent: "flex-end",
+            margin: "12px 0",
+          }}
+        >
+          <label className="muted" htmlFor="recipe-sort">
+            Sort
+          </label>
+          <select
+            id="recipe-sort"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortOrder)}
+          >
+            <option value="favorites">Favourites first</option>
+            <option value="leastRecent">Least recently cooked</option>
+          </select>
+        </div>
+        {sorted.map((r) => (
           <div className="card recipe-row" key={r.id}>
             {/* Decorative: the recipe name beside it is the real link. */}
             <Link
@@ -261,6 +394,18 @@ export default function RecipesPage() {
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span>
                   {r.ingredients.length} ingredients · serves {r.statedServings}
+                  {cookTimeLabel(r) && ` · ${cookTimeLabel(r)}`}
+                </span>
+
+                {/* The staleness line the library was missing: the app has
+                    always held this (a slot joins to its week) and never said
+                    it. Italic when never cooked, because that is the row this
+                    whole screen exists to surface. */}
+                <span
+                  title={r.lastCookedOn ? weekOfLabel(r.lastCookedOn) : undefined}
+                  style={{ fontStyle: r.lastCookedOn ? "normal" : "italic" }}
+                >
+                  {lastCookedLabel(r.lastCookedOn, thisMonday)}
                 </span>
 
                 {plan && (
@@ -295,7 +440,8 @@ export default function RecipesPage() {
             </div>
             </div>
           </div>
-        ))
+        ))}
+        </>
       )}
     </>
   );

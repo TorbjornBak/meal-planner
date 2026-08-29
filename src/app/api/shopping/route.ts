@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
+import { mergeManualItems } from "@/lib/manualItems";
 import { aggregateShoppingList, type SlotForList } from "@/lib/shopping";
 
 // Shopping list generation + retrieval (§5).
@@ -71,16 +72,21 @@ export async function POST(req: Request) {
 
   const aggregated = aggregateShoppingList(slots, settings.householdSize, pantryKeys);
 
-  // Preserve checked state for ingredients that survive the regeneration.
+  // What's already on the list. Two things ride on this read: the checked state
+  // of ingredients that survive the regeneration, and the hand-added lines
+  // (§5) — kitchen roll, nappies — which no plan can produce and which a
+  // rebuild would otherwise wipe out. `mergeManualItems` makes both decisions.
   const existing = await prisma.shoppingList.findUnique({
     where: { weekPlanId },
     include: { items: true },
   });
-  const checkedByKey = new Map(
-    (existing?.items ?? []).map((i) => [i.ingredientKey, i.checked]),
-  );
+  const rows = mergeManualItems(aggregated, existing?.items ?? []);
 
-  // Replace the item set atomically, carrying checked state forward.
+  // Replace the item set atomically, carrying checked state and manual lines
+  // forward. Still a delete-and-rebuild rather than a row-by-row diff: the
+  // amounts on a derived line change with the plan and the household size, so
+  // most surviving rows would need updating anyway, and one write of the whole
+  // set is easier to reason about than three sets of deltas.
   const list = await prisma.$transaction(async (tx) => {
     const sl = await tx.shoppingList.upsert({
       where: { weekPlanId },
@@ -89,17 +95,7 @@ export async function POST(req: Request) {
     });
     await tx.shoppingListItem.deleteMany({ where: { shoppingListId: sl.id } });
     await tx.shoppingListItem.createMany({
-      data: aggregated.map((a) => ({
-        shoppingListId: sl.id,
-        ingredientKey: a.ingredientKey,
-        displayName: a.displayName,
-        quantity: a.quantity,
-        unit: a.unit,
-        altQuantity: a.altQuantity,
-        altUnit: a.altUnit,
-        isPantry: a.isPantry,
-        checked: checkedByKey.get(a.ingredientKey) ?? false,
-      })),
+      data: rows.map((r) => ({ ...r, shoppingListId: sl.id })),
     });
     return tx.shoppingList.findUnique({
       where: { id: sl.id },

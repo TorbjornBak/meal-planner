@@ -27,6 +27,15 @@ export interface ParsedRecipe {
   ingredients: ParsedIngredient[];
   /** The method/steps block, for the cooking view. Null if not found. */
   instructions: string | null;
+  /**
+   * Total time in minutes as the page *declared* it — schema.org `totalTime`,
+   * or `prepTime` + `cookTime` (see src/lib/html.ts). Null whenever the source
+   * didn't say, which includes every hand-pasted recipe: prose carries no such
+   * claim, and summing the step timers instead is a guess that belongs to the
+   * caller to make and to label (see `estimateTotalMinutes` in durations.ts).
+   * So a number here is always someone else's statement of fact, never ours.
+   */
+  totalTimeMinutes: number | null;
 }
 
 /**
@@ -137,6 +146,8 @@ export function parseRecipeText(text: string): ParsedRecipe {
     statedServings: extractServings(text),
     ingredients: extractIngredients(lines),
     instructions: extractInstructions(lines),
+    // Free text declares no machine-readable time; the caller estimates.
+    totalTimeMinutes: null,
   };
 }
 

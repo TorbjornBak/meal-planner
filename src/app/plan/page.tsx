@@ -1,9 +1,19 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
+import { nightNoteLabel, type NightNote } from "@/lib/nightNotes";
+import { searchRecipes } from "@/lib/recipeSearch";
 
 // Weekly dinner plan (§3, §4), laid out as a calendar week. Assign one or more
 // recipes to any night; leave nights empty for leftovers / eating out. Optional
@@ -12,6 +22,9 @@ import { recipeImageSrc } from "@/lib/recipeImage";
 //
 // You can page backwards and forwards through weeks: the plan API upserts
 // whichever week you ask for, so next week exists the moment you look at it.
+//
+// Dinners are added through one searchable dialog shared by all seven nights,
+// not a <select> per night: see the picker section below.
 
 const DAYS = [
   "Monday",
@@ -36,16 +49,26 @@ interface Slot {
   servingsOverride: number | null;
   recipe: SlotRecipe | null;
 }
+/** A night the household settled without cooking (§3) — see /api/plan/note. */
+interface PlanNightNote extends NightNote {
+  dayOfWeek: number;
+}
 interface WeekPlan {
   id: string;
   weekStart: string;
   slots: Slot[];
+  nightNotes: PlanNightNote[];
 }
 interface RecipeOption {
   id: string;
   name: string;
   imageMime: string | null;
   imageUrl: string | null;
+  /**
+   * Names only, and only so the picker can search on them (§2).
+   * `GET /api/recipes` already sends these, so wanting them costs no request.
+   */
+  ingredients: { name: string }[];
 }
 
 /** `YYYY-MM-DD` for the Monday of the week containing `d`, in UTC like the API. */
@@ -110,6 +133,11 @@ function PlanCalendar() {
   const [plan, setPlan] = useState<WeekPlan | null>(null);
   const [recipes, setRecipes] = useState<RecipeOption[]>([]);
   const [generating, setGenerating] = useState(false);
+  // Copying last week's dinners in (§3) — see copyLastWeek below. The note is
+  // what the copy turned out to be: how many dinners came across, and whether
+  // any were dropped because their recipe is gone.
+  const [copying, setCopying] = useState(false);
+  const [copyNote, setCopyNote] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/recipes")
@@ -120,8 +148,10 @@ function PlanCalendar() {
   useEffect(() => {
     let stale = false;
     // Cleared first: paging to another week shouldn't leave the old week's
-    // dinners on screen looking like they belong to the new one.
+    // dinners on screen looking like they belong to the new one. Nor its copy
+    // note, which is a sentence about a week you're no longer looking at.
     setPlan(null);
+    setCopyNote(null);
     fetch(`/api/plan?weekStart=${weekStart}`)
       .then((r) => r.json())
       .then((p) => {
@@ -144,6 +174,55 @@ function PlanCalendar() {
       });
       const slot: Slot = await res.json();
       setPlan((p) => (p ? { ...p, slots: [...p.slots, slot] } : p));
+    },
+    [plan],
+  );
+
+  // Marking a night as settled (§3, §9b). Not optimistic: the row is upserted
+  // server-side, and a note that appeared locally but never landed would leave
+  // the household believing a night was decided while the digest still nagged
+  // about it — the one confusion this feature exists to end.
+  const setNote = useCallback(
+    async (dayOfWeek: number, kind: NightNote["kind"]) => {
+      if (!plan) return;
+      const res = await fetch("/api/plan/note", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekPlanId: plan.id, dayOfWeek, kind }),
+      });
+      if (!res.ok) return;
+      const note: PlanNightNote = await res.json();
+      setPlan((p) =>
+        p
+          ? {
+              ...p,
+              // Replaced rather than appended: a night holds one decision, and
+              // the server upserts on exactly that.
+              nightNotes: [
+                ...(p.nightNotes ?? []).filter((n) => n.dayOfWeek !== dayOfWeek),
+                note,
+              ],
+            }
+          : p,
+      );
+    },
+    [plan],
+  );
+
+  // Clearing is optimistic, unlike setting: the worst case is a night that
+  // looks undecided for a moment and comes back settled on the next read.
+  const clearNote = useCallback(
+    async (dayOfWeek: number) => {
+      if (!plan) return;
+      setPlan((p) =>
+        p
+          ? { ...p, nightNotes: (p.nightNotes ?? []).filter((n) => n.dayOfWeek !== dayOfWeek) }
+          : p,
+      );
+      await fetch(
+        `/api/plan/note?weekPlanId=${plan.id}&dayOfWeek=${dayOfWeek}`,
+        { method: "DELETE" },
+      );
     },
     [plan],
   );
@@ -176,6 +255,151 @@ function PlanCalendar() {
     },
     [],
   );
+
+  // Fill this week from the week before it (§3). Households eat on a rotation,
+  // and rebuilding the same seven nights by hand every Sunday is the friction
+  // that gets a planner abandoned.
+  //
+  // "Last week" means the week before the one you have *open*, not the week
+  // before today: the calendar pages, and planning next week off this one is
+  // the case this exists for.
+  const copyLastWeek = useCallback(async () => {
+    if (!plan || copying) return;
+    const from = addDays(weekStart, -7);
+
+    // The copy appends rather than replaces — deliberately, so it can never
+    // wipe a half-planned week (see api/plan/copy). The cost of that choice is
+    // that copying into a week with dinners on it doubles them up, so ask
+    // before doing it. An empty week has nothing to lose and goes straight
+    // through: that's the tap this control is for.
+    if (
+      plan.slots.length > 0 &&
+      !window.confirm(
+        `${weekLabel(weekStart)} already has dinners. Add ${weekLabel(from)}'s on top of them?`,
+      )
+    ) {
+      return;
+    }
+
+    setCopying(true);
+    setCopyNote(null);
+    try {
+      const res = await fetch("/api/plan/copy", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekPlanId: plan.id, copyFromWeekStart: from }),
+      });
+      if (!res.ok) {
+        setCopyNote("Couldn't copy that week — nothing was changed.");
+        return;
+      }
+      const { copied, skipped } = (await res.json()) as {
+        copied: number;
+        skipped: number;
+      };
+
+      // Refetched, not folded into state the way addDinner does with its one
+      // returned slot: a copy creates several dinners at once and the server
+      // decides all of it — their ids, their positions on a night that may
+      // already be occupied, and which of them survived the recipe check. The
+      // week is refetched even when nothing was copied, since the answer tells
+      // us the source week was empty, not what this one holds.
+      const fresh: WeekPlan = await fetch(
+        `/api/plan?weekStart=${weekStart}`,
+      ).then((r) => r.json());
+      // Only if it's still the week on screen: paging away mid-copy already
+      // loaded another week, and this response would stamp over it.
+      setPlan((p) => (p && p.id === fresh.id ? fresh : p));
+
+      setCopyNote(
+        copied === 0
+          ? `Nothing to copy — ${weekLabel(from)} had no dinners.`
+          : `Copied ${copied} dinner${copied === 1 ? "" : "s"} from ${weekLabel(from)}.` +
+            (skipped > 0
+              ? ` ${skipped} skipped — ${skipped === 1 ? "that recipe is" : "those recipes are"} no longer in the library.`
+              : ""),
+      );
+    } finally {
+      setCopying(false);
+    }
+  }, [plan, copying, weekStart]);
+
+  // --- The recipe picker ---------------------------------------------------
+  //
+  // One dialog for the whole week, rather than a <select> per night. Seven
+  // copies of the library is a lot of markup to carry around, none of it
+  // searchable, and hunting one dinner among a hundred through a native scroll
+  // wheel on a phone is miserable. `pickerDay` doubles as "is it open" and
+  // "which night is it adding to".
+  const [pickerDay, setPickerDay] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // Filtered here in the browser: every recipe's ingredients arrived with the
+  // library, so searching costs no request per keystroke and keeps working
+  // offline over Tailscale (§10).
+  const results = useMemo(() => searchRecipes(recipes, query), [recipes, query]);
+
+  function openPicker(dayOfWeek: number) {
+    setQuery("");
+    setHighlight(0);
+    setPickerDay(dayOfWeek);
+  }
+
+  // showModal() is what makes it modal — the backdrop, the focus trap and
+  // Escape are all the browser's. Driving it from an effect rather than
+  // rendering `open` keeps React the single source of truth for whether the
+  // picker is up.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (pickerDay === null) {
+      if (dialog.open) dialog.close();
+      return;
+    }
+    if (!dialog.open) dialog.showModal();
+    // showModal() places focus itself, so take it back afterwards: typing
+    // should land in the search box without a tap.
+    inputRef.current?.focus();
+  }, [pickerDay]);
+
+  // Keep the highlighted row on screen when the arrow keys walk off the edge.
+  useEffect(() => {
+    listRef.current?.children[highlight]?.scrollIntoView({ block: "nearest" });
+  }, [highlight]);
+
+  const pick = useCallback(
+    (recipeId: string) => {
+      if (pickerDay === null) return;
+      // Not awaited: the dialog should shut on the tap, and addDinner already
+      // folds the created slot into the calendar when the server answers.
+      void addDinner(pickerDay, recipeId);
+      setPickerDay(null);
+    },
+    [pickerDay, addDinner],
+  );
+
+  function onPickerKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      // Wraps, so holding one arrow gets you round the list either way.
+      e.preventDefault();
+      if (results.length === 0) return;
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      setHighlight((h) => (h + step + results.length) % results.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const chosen = results[highlight];
+      if (chosen) pick(chosen.recipe.id);
+    } else if (e.key === "Escape") {
+      // Handled here as well as natively: a search input with text in it eats
+      // the first Escape in some browsers, and one press should always close.
+      e.preventDefault();
+      setPickerDay(null);
+    }
+  }
 
   async function generate() {
     if (!plan) return;
@@ -221,13 +445,29 @@ function PlanCalendar() {
         </button>
       </div>
 
-      {weekStart !== thisWeek && (
-        <p>
+      {/*
+        The week's own actions, straight under the header: both of these are
+        about the week as a whole rather than any one night. A row of its own
+        rather than more children in .week-header, which is a three-part
+        ←/title/→ flex — hanging a wide button off one end pulls the date off
+        centre.
+      */}
+      <div className="week-actions">
+        {weekStart !== thisWeek && (
           <button className="muted" onClick={() => setWeekStart(thisWeek)}>
             ← Back to this week
           </button>
-        </p>
-      )}
+        )}
+        {/* Offered on any week, not only an empty one: a week you've started
+            is exactly where you notice you're rebuilding last week by hand.
+            The confirm in copyLastWeek is what keeps that safe. */}
+        {plan && (
+          <button onClick={copyLastWeek} disabled={copying}>
+            {copying ? "Copying…" : "Copy last week"}
+          </button>
+        )}
+        {copyNote && <span className="muted">{copyNote}</span>}
+      </div>
 
       {recipes.length === 0 && (
         <p className="muted">
@@ -241,6 +481,9 @@ function PlanCalendar() {
           const date = addDays(weekStart, dayOfWeek);
           const daySlots =
             plan?.slots.filter((s) => s.dayOfWeek === dayOfWeek) ?? [];
+          const dayNote = (plan?.nightNotes ?? []).find(
+            (n) => n.dayOfWeek === dayOfWeek,
+          );
 
           return (
             <div
@@ -255,8 +498,11 @@ function PlanCalendar() {
               <div className="day-body">
                 {!plan ? (
                   <p className="muted day-empty">…</p>
-                ) : daySlots.length === 0 ? (
-                  <p className="muted day-empty">Leftovers / eating out</p>
+                ) : daySlots.length === 0 && !dayNote ? (
+                  // Honest about being a gap. This used to read "Leftovers /
+                  // eating out", which described the decision and the gap
+                  // identically — the ambiguity notes exist to remove.
+                  <p className="muted day-empty">Nothing planned yet</p>
                 ) : (
                   daySlots.map((slot) => {
                     const recipe = slot.recipe;
@@ -308,33 +554,152 @@ function PlanCalendar() {
                     );
                   })
                 )}
+
+                {dayNote && (
+                  <p className="day-note">
+                    <span>{nightNoteLabel(dayNote)}</span>
+                    <button
+                      className="day-note-clear"
+                      onClick={() => clearNote(dayOfWeek)}
+                      aria-label={`${dayName} isn't settled after all`}
+                      title="Back to undecided"
+                    >
+                      ×
+                    </button>
+                  </p>
+                )}
               </div>
 
+              {/* Offered only on a night with nothing on it and nothing said:
+                  a night already cooking doesn't need marking as leftovers,
+                  and a settled one is changed by clearing it first. */}
+              {plan && daySlots.length === 0 && !dayNote && (
+                <div className="day-decide">
+                  <button onClick={() => setNote(dayOfWeek, "LEFTOVERS")}>
+                    Leftovers
+                  </button>
+                  <button onClick={() => setNote(dayOfWeek, "OUT")}>
+                    Eating out
+                  </button>
+                </div>
+              )}
+
               {plan && (
-                <select
-                  className="day-picker"
-                  // A pure "add" control: it never reflects a selection, so it
-                  // resets to the prompt after each pick.
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) addDinner(dayOfWeek, e.target.value);
-                  }}
+                <button
+                  className="day-add"
+                  onClick={() => openPicker(dayOfWeek)}
+                  // Nothing to pick from yet; the note above the calendar says
+                  // where to go instead.
+                  disabled={recipes.length === 0}
                   aria-label={`Add dinner for ${dayName}`}
                 >
-                  <option value="">
-                    {daySlots.length ? "+ Add another" : "+ Add dinner"}
-                  </option>
-                  {recipes.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
+                  {daySlots.length ? "+ Add another" : "+ Add dinner"}
+                </button>
               )}
             </div>
           );
         })}
       </div>
+
+      {/*
+        The picker. Its contents only exist while it's open, which is what
+        resets the query between nights and what lets the input be focused on
+        mount. It's a combobox over a listbox: focus stays in the text field
+        and the highlight moves under it, so typing and arrowing don't fight.
+      */}
+      <dialog
+        ref={dialogRef}
+        className="picker-dialog"
+        // Fires for the browser's own Escape as well as our close() calls, so
+        // React's idea of "open" can't drift from the DOM's.
+        onClose={() => setPickerDay(null)}
+        onClick={(e) => {
+          // A click on the backdrop lands on the <dialog> element itself. The
+          // body below fills it edge to edge, so nothing inside the picker can
+          // be mistaken for the backdrop — the usual tap-outside-to-dismiss.
+          if (e.target === dialogRef.current) setPickerDay(null);
+        }}
+      >
+        {pickerDay !== null && (
+          <div className="picker-body">
+            <div className="picker-head">
+              <h2 className="picker-title">
+                Add dinner — {DAYS[pickerDay]}{" "}
+                {dayNumber(addDays(weekStart, pickerDay))}
+              </h2>
+              <button
+                className="muted"
+                onClick={() => setPickerDay(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <input
+              ref={inputRef}
+              className="picker-input"
+              type="search"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                // The old highlight means nothing against a new result list.
+                setHighlight(0);
+              }}
+              onKeyDown={onPickerKeyDown}
+              placeholder="Search by name or ingredient…"
+              role="combobox"
+              aria-expanded={true}
+              aria-controls="picker-results"
+              aria-autocomplete="list"
+              aria-activedescendant={
+                results[highlight] ? `picker-option-${highlight}` : undefined
+              }
+            />
+
+            {results.length === 0 ? (
+              <p className="muted picker-empty">
+                No recipe matches “{query.trim()}”.
+              </p>
+            ) : (
+              <ul
+                ref={listRef}
+                id="picker-results"
+                className="picker-results"
+                role="listbox"
+                aria-label="Recipes"
+              >
+                {results.map((match, i) => (
+                  <li
+                    key={match.recipe.id}
+                    id={`picker-option-${i}`}
+                    role="option"
+                    aria-selected={i === highlight}
+                    className={`picker-option${
+                      i === highlight ? " picker-option-on" : ""
+                    }`}
+                    // mousemove rather than mouseenter: after an arrow-key
+                    // press the pointer may already be sitting over a row, and
+                    // only actual movement should take the highlight back.
+                    onMouseMove={() => setHighlight(i)}
+                    onClick={() => pick(match.recipe.id)}
+                  >
+                    <span className="picker-option-name">
+                      {match.recipe.name}
+                    </span>
+                    {/* Why this one turned up, when the name doesn't say. */}
+                    {match.matchedIngredients.length > 0 && (
+                      <span className="muted picker-why">
+                        {match.matchedIngredients.join(" · ")}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </dialog>
 
       <button onClick={generate} disabled={generating || !anyRecipeAssigned}>
         {generating ? "Generating…" : "Generate shopping list"}

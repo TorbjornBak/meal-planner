@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { currentUser } from "@/lib/currentUser";
 import { INVITE_TTL_MS, issueAuthToken, looksLikeEmail, normalizeEmail } from "@/lib/auth";
-import { isMailConfigured, sendMail } from "@/lib/mail";
+import { MailNotConfiguredError, appUrl, isMailConfigured, sendMail } from "@/lib/mail";
 import { inviteEmail } from "@/lib/emails";
 import { describeMailError } from "@/lib/mailError";
 
@@ -54,19 +54,51 @@ const Invite = z.object({
 });
 
 /**
+ * The address an invitee opens — /reset/<token>, the very page the emailed
+ * invitation links to.
+ *
+ * APP_URL first, so a household that has published a name for the box hands
+ * out that name whether or not the link happens to be travelling by email.
+ * Without APP_URL we fall back to the origin this request arrived on: it came
+ * from a member's browser, and every member reaches the box by the same
+ * MagicDNS name on the tailnet (§10), so what worked for the inviter works for
+ * the invitee. That fallback can read as loopback behind a proxy — the same
+ * caveat the unsubscribe redirect carries — but the link is being shown to a
+ * person who can see the host is wrong and fix it, not fired into a mailbox.
+ */
+function inviteUrl(req: Request, token: string): string {
+  const path = `/reset/${token}`;
+  try {
+    return appUrl(path);
+  } catch {
+    return new URL(path, new URL(req.url).origin).toString();
+  }
+}
+
+/**
  * POST /api/users — invite someone by email.
  *
  * Creates the account with no password and mails a link to choose one. Sending
  * it again to an address that's still pending simply re-issues the link, which
  * is what "resend invite" does.
+ *
+ * An instance with no SMTP server still invites. Mail is how the link usually
+ * travels, not what makes it valid — the account and its INVITE token are
+ * database rows either way (§9). Refusing here used to mean a household that
+ * hadn't wired up SMTP could create exactly one account at /setup and then
+ * never add the person they share the kitchen with. So when there's nothing to
+ * send with, the link comes back in the response instead and the member passes
+ * it on themselves. Everything else in the app degrades this way; invitation
+ * was the one path that couldn't.
+ *
+ * Answers `{ user, delivered, inviteUrl? }` — a 201 either way, because a
+ * member row is created either way. `inviteUrl` appears only on the
+ * undelivered branch: when the mail did go out, the link is already where it
+ * belongs and putting a live credential in a second place is pure risk.
  */
 export async function POST(req: Request) {
   const me = await currentUser();
   if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-  if (!isMailConfigured()) {
-    return NextResponse.json({ error: "mail-not-configured" }, { status: 503 });
-  }
 
   const parsed = Invite.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -90,24 +122,10 @@ export async function POST(req: Request) {
     }));
 
   const token = await issueAuthToken(user.id, "INVITE", INVITE_TTL_MS);
-  const mail = inviteEmail({
-    name: user.name,
-    token,
-    invitedBy: me.name || me.email,
-  });
 
-  try {
-    await sendMail({ to: user.email, ...mail });
-  } catch (err) {
-    console.error("invite mail failed", err);
-    // The invitee can't act on a mail that never arrived, so unlike the
-    // forgot-password route this one admits the failure — and says what went
-    // wrong, because the person reading it is the one who can fix the setting.
-    const diagnosis = describeMailError(err, process.env.SMTP_HOST);
-    return NextResponse.json({ error: "mail-failed", ...diagnosis }, { status: 502 });
-  }
-
-  return NextResponse.json({
+  // Shaped like a row of the GET roster, so the card can render the new member
+  // without waiting for a reload.
+  const member = {
     id: user.id,
     email: user.email,
     name: user.name,
@@ -116,7 +134,38 @@ export async function POST(req: Request) {
     lastLoginAt: null,
     createdAt: user.createdAt,
     isMe: false,
-  });
+  };
+
+  if (isMailConfigured()) {
+    try {
+      const mail = inviteEmail({
+        name: user.name,
+        token,
+        invitedBy: me.name || me.email,
+      });
+      await sendMail({ to: user.email, ...mail });
+      return NextResponse.json({ user: member, delivered: true }, { status: 201 });
+    } catch (err) {
+      // A configuration that vanished between the check and the send (an
+      // empty APP_URL, say) isn't a delivery failure — it's the no-mail case
+      // arriving late, so fall through and hand the link back.
+      if (!(err instanceof MailNotConfiguredError)) {
+        console.error("invite mail failed", err);
+        // The invitee can't act on a mail that never arrived, so unlike the
+        // forgot-password route this one admits the failure — and says what
+        // went wrong, because the person reading it is the one who can fix the
+        // setting. A working relay that refused this message is a fault to
+        // repair, not a reason to start passing links around by hand.
+        const diagnosis = describeMailError(err, process.env.SMTP_HOST);
+        return NextResponse.json({ error: "mail-failed", ...diagnosis }, { status: 502 });
+      }
+    }
+  }
+
+  return NextResponse.json(
+    { user: member, inviteUrl: inviteUrl(req, token), delivered: false },
+    { status: 201 },
+  );
 }
 
 /**
