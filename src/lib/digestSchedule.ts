@@ -14,6 +14,7 @@
  */
 
 import { mondayOf, nextMonday } from "./newsletter.ts";
+import { instantAt, isValidTimeZone } from "./wallClock.ts";
 
 /** Monday-first, matching DinnerSlot.dayOfWeek and DigestNight.dayOfWeek. */
 const DAY_NAMES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
@@ -36,73 +37,6 @@ export const DEFAULT_SCHEDULE: DigestSchedule = {
   hour: 17,
   timeZone: "Europe/Copenhagen",
 };
-
-/**
- * `Intl.DateTimeFormat` is used here where newsletter.ts deliberately avoids
- * it. That module needed month *names*, which differ across ICU builds ("Sep"
- * vs "Sept"); this needs numbers, which don't. The alternative is a hand-rolled
- * table of DST rules, which would be wrong the first time a government moved a
- * changeover date.
- */
-const formatters = new Map<string, Intl.DateTimeFormat>();
-
-function formatterFor(timeZone: string): Intl.DateTimeFormat {
-  let f = formatters.get(timeZone);
-  if (!f) {
-    f = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-    formatters.set(timeZone, f);
-  }
-  return f;
-}
-
-/** True if the runtime recognises this zone — an unknown one throws. */
-export function isValidTimeZone(timeZone: string): boolean {
-  try {
-    formatterFor(timeZone);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** How far the zone's wall clock runs ahead of UTC at a given instant. */
-function zoneOffsetMs(instant: Date, timeZone: string): number {
-  const parts = formatterFor(timeZone).formatToParts(instant);
-  const at = (type: string) => Number(parts.find((p) => p.type === type)?.value);
-  // Midnight comes back as hour 24 on some ICU builds and 0 on others.
-  const hour = at("hour") === 24 ? 0 : at("hour");
-  const asUtc = Date.UTC(at("year"), at("month") - 1, at("day"), hour, at("minute"), at("second"));
-  return asUtc - instant.getTime();
-}
-
-/**
- * The instant at which a wall-clock time in a zone occurs.
- *
- * Two passes, because the offset has to be read at the answer rather than at
- * the guess: on the weekend a zone shifts, the offset an hour before the
- * changeover isn't the offset an hour after, and a single pass lands an hour
- * out. The second pass re-reads the offset at the instant the first produced.
- */
-function instantAt(
-  year: number,
-  monthIndex: number,
-  day: number,
-  hour: number,
-  timeZone: string,
-): Date {
-  const naive = Date.UTC(year, monthIndex, day, hour);
-  const firstPass = naive - zoneOffsetMs(new Date(naive), timeZone);
-  return new Date(naive - zoneOffsetMs(new Date(firstPass), timeZone));
-}
 
 /**
  * The instant this week's digest becomes due.

@@ -324,11 +324,49 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Each household member installs Tailscale once and joins the tailnet.
 - **Possible VPS migration later** — kept cheap by building Dockerized from day one.
 
-## 11. Backups — Borg → Hetzner Storage Box
+## 11. Backups — Borg, taken by the app
 
-- Nightly `borg create` of the Postgres dump + receipt-photo directory to a Hetzner
-  Storage Box (deduplicated, encrypted, incremental), with `borg prune` for retention.
-- Non-optional — it's the one real weakness of a home box.
+- Nightly `borg create` of the Postgres dump to a repository over SSH — a Hetzner
+  Storage Box is the cheap one — deduplicated, encrypted and incremental, with
+  `borg prune` for retention and `borg compact` to actually free what it drops.
+- **Non-optional** — it's the one real weakness of a home box. Everything the
+  household has is in that database, receipt photos included (§7).
+- **The app takes them**, on the timer started from Next's `instrumentation`
+  hook (§9b). This began as `scripts/backup.sh` in the host's crontab, which is
+  the arrangement §9b had already thrown out for the weekly digest: unversioned,
+  missing from a rebuilt box, silent when wrong. It is a worse arrangement for
+  backups than it was for mail — a digest that stops arriving is noticed by five
+  people on Friday; a backup that stops running is noticed once, on the day the
+  disk dies.
+- **Due, not fired.** The schedule asks which day's backup should exist by now,
+  not "is it 03:00?", so a box that was off at three backs up when it comes
+  back, and a failed attempt is retried within the hour. A missed cron firing was
+  simply lost. The hour is a wall clock in a configured zone, so it doesn't move
+  when the clocks do.
+- **Every attempt is recorded**, successes and failures alike, and the settings
+  screen shows the last one in a sentence. "Backed up 6 hours ago" is the whole
+  point: backups fail silently by nature, and a household that can see the answer
+  finds out on a Tuesday rather than on the worst day of the year.
+- **Set up from the settings screen**, in the order it's actually done: point at
+  a repository, choose a passphrase, install a key, create the repository, take
+  the first backup. The app generates its own SSH key and shows the public half
+  to paste into the storage box, so nobody has to find their way into a container
+  to run `ssh-keygen`. Failures come back as a sentence and the setting to go and
+  change, the way SMTP failures do (§9).
+- **The dump is streamed into borg uncompressed**, not gzipped first: borg
+  deduplicates by content-defined chunking, and pre-compressing turns a one-row
+  change into a fresh copy of the whole database every night. Nothing is staged
+  on disk either — writing a copy of the database to the box whose disk you're
+  hedging against is both the slow option and the one that fails when it matters.
+- **A truncated dump is never left behind.** If pg_dump dies halfway, borg sees a
+  clean end of stream and writes a valid archive holding half a database — so the
+  dump's exit code is checked and a bad archive is deleted. A backup that failed
+  is recoverable; one that lies is not.
+- **The passphrase lives in the environment, never in the database.** It is the
+  only thing that can decrypt the archives, and keeping it inside the thing being
+  backed up would make them unreadable exactly when they were needed. Encryption
+  is `repokey`, so the key travels in the repository and the passphrase alone
+  restores from any machine.
 
 ## 12. Stack
 
@@ -363,6 +401,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   with an expiry and a spent-at marker (§9).
 - **NewsletterSend** — one digest, one member, one week; the unique constraint is
   what makes the weekly send idempotent (§9b).
+- **BackupRun** — one attempt at a nightly backup: the day it covers, whether it
+  worked, the archive name and sizes, and the diagnosis if it didn't (§11).
 - **Settings** — household size.
 
 ---
@@ -372,9 +412,11 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Bulk or automated crawling of source sites — no crawler, no background jobs,
   no re-fetching on a schedule. Single-page import of a URL *you* paste is
   supported (§1); it's a best-effort fetch of one page you chose, with the
-  bookmarklet as the fallback when a site blocks it. The weekly digest's timer
-  (§9b) is the one exception, and a narrow one: it fetches nothing and calls
-  nobody, it only asks the database whether this week's mail is owed.
+  bookmarklet as the fallback when a site blocks it. The app's two timers are the
+  exceptions, and narrow ones: the weekly digest (§9b) fetches nothing and calls
+  nobody, it only asks the database whether this week's mail is owed, and the
+  nightly backup (§11) talks only to a storage box the household chose and paid
+  for. Neither reaches out to a service on anyone else's behalf.
 - Line-item spend and item-level cost attribution. Receipts are OCR'd for their
   total only (§7); nothing reads the individual products off them.
 - Budget targets and over-budget alerts.

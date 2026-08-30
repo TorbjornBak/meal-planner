@@ -1,12 +1,17 @@
 "use client";
 
 /**
- * How an SMTP failure is shown (§9).
+ * How a failure that someone can go and fix is shown (§9, §11).
  *
- * The summary and hint come from src/lib/mailError.ts; the raw server reply is
- * kept behind a disclosure so the useful sentence isn't buried under it, but
- * nothing is hidden — the raw text is what you paste into a search when the
- * hint turns out to be wrong.
+ * Shared by the two things in this app that talk to a server the household
+ * runs: SMTP (§9, summaries from src/lib/mailError.ts) and backups (§11, from
+ * src/lib/borgError.ts). Both produce the same shape — a sentence, something
+ * to change, and the raw output — because both are read by the same person,
+ * who is also the person who can go and change the setting.
+ *
+ * The raw text is kept behind a disclosure so the useful sentence isn't buried
+ * under it, but nothing is hidden: that text is what you paste into a search
+ * when the hint turns out to be wrong.
  */
 export interface Diagnosis {
   summary?: string;
@@ -14,7 +19,7 @@ export interface Diagnosis {
   detail?: string;
 }
 
-export function MailDiagnosis({ d, ok }: { d: Diagnosis; ok?: boolean }) {
+export function DiagnosisPanel({ d, ok }: { d: Diagnosis; ok?: boolean }) {
   if (!d.summary && !d.detail) return null;
 
   return (
