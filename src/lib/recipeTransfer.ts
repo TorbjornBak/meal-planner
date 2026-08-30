@@ -3,6 +3,7 @@ import { z } from "zod";
 // Imported relatively, with its extension, so the round-trip test can run this
 // module straight through Node — the `@/` alias only exists inside the bundler.
 import { DEFAULT_RECIPE_KIND, RECIPE_KINDS, type RecipeKind } from "./recipeKind.ts";
+import { RECIPE_CATEGORIES, type RecipeCategory } from "./recipeCategory.ts";
 
 /**
  * The recipe-library transfer file (§2, §11) — one shape, seen from both sides.
@@ -57,6 +58,13 @@ export interface TransferRecipe {
    * read as DINNER — which is what every recipe in such a file is.
    */
   kind: RecipeKind;
+  /**
+   * What it's made of (§2d), or null when nobody has said. Null travels as
+   * null rather than being dropped: an importing household is no better placed
+   * to guess than the exporting one was, and the receiving library shows
+   * "not said" — which is true — instead of quietly filing it as meat.
+   */
+  category: RecipeCategory | null;
   source: string | null;
   statedServings: number;
   instructions: string | null;
@@ -89,6 +97,7 @@ export interface RecipeTransferFile {
 export interface RecipeRowForTransfer {
   name: string;
   kind: RecipeKind;
+  category: RecipeCategory | null;
   source: string | null;
   statedServings: number;
   instructions: string | null;
@@ -126,6 +135,7 @@ export function toTransferRecipe(row: RecipeRowForTransfer): TransferRecipeWithL
   return {
     name: row.name,
     kind: row.kind ?? DEFAULT_RECIPE_KIND,
+    category: row.category ?? null,
     source: row.source ?? null,
     statedServings: row.statedServings,
     instructions: row.instructions ?? null,
@@ -192,6 +202,12 @@ const TransferRecipeSchema = z.object({
   // perfectly good file — and a hand-written one shouldn't have to say
   // `"kind": "DINNER"` on every entry to be read.
   kind: z.enum(RECIPE_KINDS).default(DEFAULT_RECIPE_KIND),
+  // Null-defaulted, not required: a file older than categories is a perfectly
+  // good file, and every recipe in it is honestly uncategorised. An unknown
+  // value — a category some later version added — is a real rejection though,
+  // and not one to paper over with a default: silently reading "PESCATARIAN"
+  // as "no answer" would lose the very claim the file was carrying.
+  category: z.enum(RECIPE_CATEGORIES).nullable().default(null),
   source: z.string().max(2000).nullable().default(null),
   statedServings: z.number().int().positive().max(1000),
   instructions: z.string().nullable().default(null),
@@ -329,6 +345,7 @@ export function toRecipeCreateData(recipe: TransferRecipeWithLines) {
   return {
     name: recipe.name.trim(),
     kind: recipe.kind,
+    category: recipe.category,
     source: recipe.source,
     instructions: recipe.instructions,
     statedServings: recipe.statedServings,

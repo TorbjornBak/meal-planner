@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 import { RECIPE_KINDS } from "@/lib/recipeKind";
+import { RECIPE_CATEGORIES } from "@/lib/recipeCategory";
 
 // Recipe library CRUD (§2).
 
@@ -12,6 +13,11 @@ const RecipeInput = z.object({
   // review step, the bookmarklet, the transfer import — keeps working and gets
   // the column's own default.
   kind: z.enum(RECIPE_KINDS).optional(),
+  // What it's made of (§2d). Nullable as well as optional: "nobody has said"
+  // is a real answer here and the one the review step offers by default — the
+  // parser can't tell a vegetarian lasagne from a meat one, and guessing would
+  // be the app inventing a dietary claim.
+  category: z.enum(RECIPE_CATEGORIES).nullable().optional(),
   source: z.string().optional().nullable(),
   instructions: z.string().optional().nullable(),
   statedServings: z.number().int().positive(),
@@ -96,13 +102,14 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { name, kind, source, instructions, statedServings, tags, ingredients } =
+  const { name, kind, category, source, instructions, statedServings, tags, ingredients } =
     parsed.data;
 
   const recipe = await prisma.recipe.create({
     data: {
       name,
       ...(kind ? { kind } : {}),
+      category: category ?? null,
       source: source ?? null,
       instructions: instructions ?? null,
       statedServings,

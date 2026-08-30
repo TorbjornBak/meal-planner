@@ -39,6 +39,7 @@ export async function GET() {
     select: {
       name: true,
       kind: true,
+      category: true,
       source: true,
       statedServings: true,
       instructions: true,

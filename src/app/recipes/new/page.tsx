@@ -9,6 +9,13 @@ import {
   yieldNoun,
   type RecipeKind,
 } from "@/lib/recipeKind";
+import {
+  RECIPE_CATEGORIES,
+  UNCATEGORISED_LABEL,
+  categoryHint,
+  categoryLabel,
+  type RecipeCategory,
+} from "@/lib/recipeCategory";
 
 interface ParsedIngredient {
   name: string;
@@ -24,6 +31,13 @@ interface ParsedRecipe {
    * can't be trusted on.
    */
   kind: RecipeKind;
+  /**
+   * What it's made of (§2d), or null for "nobody has said". Null is the
+   * default and stays the default: the parser can't tell a vegetarian lasagne
+   * from a meat one, and this is the review step (§1), where the human
+   * corrects what we couldn't know — not one where we guess first.
+   */
+  category: RecipeCategory | null;
   source: string | null;
   instructions: string | null;
   statedServings: number;
@@ -80,7 +94,7 @@ export default function NewRecipePage() {
       });
       // The parser returns no kind, and defaulting it here rather than
       // server-side keeps /api/parse about reading text.
-      setDraft({ kind: DEFAULT_RECIPE_KIND, ...(await res.json()) });
+      setDraft({ kind: DEFAULT_RECIPE_KIND, category: null, ...(await res.json()) });
     } finally {
       setBusy(false);
     }
@@ -183,6 +197,29 @@ export default function NewRecipePage() {
               {RECIPE_KINDS.map((k) => (
                 <option key={k} value={k}>
                   {kindLabel(k).toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <br />
+          <label>
+            {/* Optional, and left unset unless somebody says. An answer we
+                invented here would follow the recipe around every filter it
+                ever appears in (§2d). */}
+            Made of{" "}
+            <select
+              value={draft.category ?? ""}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  category: (e.target.value || null) as RecipeCategory | null,
+                })
+              }
+            >
+              <option value="">{UNCATEGORISED_LABEL.toLowerCase()}</option>
+              {RECIPE_CATEGORIES.map((c) => (
+                <option key={c} value={c} title={categoryHint(c)}>
+                  {categoryLabel(c).toLowerCase()}
                 </option>
               ))}
             </select>

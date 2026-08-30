@@ -10,10 +10,20 @@ import {
   RECIPE_KINDS,
   emptyKindLine,
   isPlannable,
+  kindLabel,
   kindPlural,
   yieldNoun,
   type RecipeKind,
 } from "@/lib/recipeKind";
+import {
+  CATEGORY_FILTERS,
+  categoryFilterLabel,
+  categoryHint,
+  categoryLabel,
+  matchesCategoryFilter,
+  type CategoryFilter,
+  type RecipeCategory,
+} from "@/lib/recipeCategory";
 
 // Recipe library (§2) — browse, favorite, rename, delete; filter by ingredient
 // (tag-style); and add a recipe straight onto this week's meal plan (§3).
@@ -122,6 +132,8 @@ interface Recipe {
   name: string;
   /// Dinner or drink (§2c) — which section of the library the row belongs in.
   kind: RecipeKind;
+  /// What it's made of (§2d), or null when nobody has said.
+  category: RecipeCategory | null;
   source: string | null;
   statedServings: number;
   isFavorite: boolean;
@@ -160,6 +172,9 @@ export default function RecipesPage() {
   // Which section is open. Dinner, because that is what the app is for (§3) —
   // the drinks tab is somewhere you go on purpose.
   const [kind, setKind] = useState<RecipeKind>(DEFAULT_RECIPE_KIND);
+  // What it's made of (§2d). "Any" by default — the library's job is to show
+  // you everything until you say otherwise.
+  const [category, setCategory] = useState<CategoryFilter>("ANY");
 
   // Read once per render rather than per row, so a list rendered across
   // midnight can't age half its recipes by a week mid-paint.
@@ -207,10 +222,31 @@ export default function RecipesPage() {
   // splits a query on whitespace and ANDs the words separately, but a chip is
   // one phrase — "hakket oksekød" must keep matching as it always did.
   const filtered = useMemo(() => {
-    let rows = inSection;
+    // The category narrows first, then the chips narrow what's left. Order
+    // doesn't change the result — both are ANDs — but it does keep the
+    // autocomplete's suggestions honest about the section rather than the
+    // filtered view.
+    let rows = inSection.filter((r) => matchesCategoryFilter(r.category, category));
     for (const f of filters) rows = searchRecipes(rows, f).map((m) => m.recipe);
     return rows;
-  }, [inSection, filters]);
+  }, [inSection, filters, category]);
+
+  /**
+   * What to say when nothing comes back — which is a different sentence for
+   * each reason. "No dinners saved yet" under an active fish filter reads as
+   * the library having lost everything, when the truth is that nobody has
+   * marked a dinner as fish.
+   */
+  function emptyLine(): string {
+    if (filters.length) return "No recipes match those ingredients.";
+    if (category === "UNSET") {
+      return `Every ${kindLabel(kind).toLowerCase()} has a category — nothing left to file.`;
+    }
+    if (category !== "ANY") {
+      return `Nothing in here is marked ${categoryFilterLabel(category).toLowerCase()} yet — you can set it on a recipe's edit page.`;
+    }
+    return emptyKindLine(kind);
+  }
 
   // "Favourites first" is the order the API already sent (favourites, then
   // name), so the default costs nothing and the list you know stays put.
@@ -312,9 +348,31 @@ export default function RecipesPage() {
               // and look like the drinks had gone missing.
               setFilters([]);
               setFilterInput("");
+              // Same reasoning as the chips: "Meat" carried into Drinks would
+              // empty the list and look like the drinks had gone missing.
+              setCategory("ANY");
             }}
           >
             {kindPlural(k)} <span className="muted">{counts.get(k) ?? 0}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* A second, narrower question than the tabs above: those pick a
+          section, these pick what's on the plate (§2d). Pills rather than a
+          <select> because the answer is usually one press, and because
+          "Not said" needs to be visible — it is the backlog of recipes still
+          to be filed, and a filter nobody can see is one nobody fixes. */}
+      <div role="group" aria-label="Filter by category" className="category-filters">
+        {CATEGORY_FILTERS.map((f) => (
+          <button
+            key={f}
+            className="category-filter"
+            aria-pressed={f === category}
+            title={f === "ANY" || f === "UNSET" ? undefined : categoryHint(f)}
+            onClick={() => setCategory(f)}
+          >
+            {categoryFilterLabel(f)}
           </button>
         ))}
       </div>
@@ -369,7 +427,7 @@ export default function RecipesPage() {
 
       {sorted.length === 0 ? (
         <p className="muted">
-          {filters.length ? "No recipes match those ingredients." : emptyKindLine(kind)}
+          {emptyLine()}
         </p>
       ) : (
         <>
@@ -466,6 +524,15 @@ export default function RecipesPage() {
                   {yieldNoun(r.kind).toLowerCase()} {r.statedServings}
                   {cookTimeLabel(r) && ` · ${cookTimeLabel(r)}`}
                 </span>
+
+                {/* Shown only when somebody has said. A "not said" badge on
+                    every unfiled row would be a permanent scold; the filter
+                    above is where that backlog is worked through (§2d). */}
+                {r.category && (
+                  <span className="recipe-category" title={categoryHint(r.category)}>
+                    {categoryLabel(r.category)}
+                  </span>
+                )}
 
                 {/* The staleness line the library was missing: the app has
                     always held this (a slot joins to its week) and never said

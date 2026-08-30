@@ -4,6 +4,7 @@ import { formatDurationMinutes } from "@/lib/durations";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS, recipeImageSrc } from "@/lib/recipeImage";
 import { yieldNoun } from "@/lib/recipeKind";
+import { categoryHint, categoryLabel } from "@/lib/recipeCategory";
 import { CookingMode } from "./CookingMode";
 import { Method } from "./Method";
 
@@ -105,6 +106,18 @@ export default async function RecipeDetailPage({
             >
               {recipe.totalTimeIsEstimate ? "about " : ""}
               {formatDurationMinutes(recipe.totalTimeMinutes)}
+            </span>
+          </>
+        ) : null}
+        {/* Only when somebody has said. An uncategorised recipe shows nothing
+            here rather than a "not said" badge: this is the page you read at
+            the stove, and it is no place to be nagged about filing (§2d) —
+            the library's own filter is where that backlog is worked through. */}
+        {recipe.category ? (
+          <>
+            {" · "}
+            <span className="recipe-category" title={categoryHint(recipe.category)}>
+              {categoryLabel(recipe.category)}
             </span>
           </>
         ) : null}
