@@ -16,7 +16,14 @@ export async function GET(
   const recipe = await prisma.recipe.findUnique({
     where: { id },
     omit: OMIT_RECIPE_BLOBS,
-    include: { ingredients: { orderBy: { position: "asc" } } },
+    include: {
+      ingredients: { orderBy: { position: "asc" } },
+      // How many nights it is currently on, so the editor's delete step can
+      // say what deleting costs: the slots go with it (cascade), and a recipe
+      // that is on this week's plan is not the same thing to delete as one
+      // nobody has cooked yet.
+      _count: { select: { dinnerSlots: true } },
+    },
   });
   if (!recipe) {
     return NextResponse.json({ error: "not found" }, { status: 404 });

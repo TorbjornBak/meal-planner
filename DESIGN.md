@@ -27,12 +27,19 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   and correct the parsed ingredients before they count toward anything. Bad parse
   = wrong list. URL and bookmarklet imports save a draft and drop you straight on
   the edit page to do this.
+- **Cancelling a fetched recipe throws it away.** A URL import has to be saved
+  before you can review it — the page has already been fetched and parsed — but
+  it isn't yours until you say so. Cancelling that first review deletes the
+  draft rather than leaving an unreviewed recipe in the library.
 
 ## 2. Recipe library — full curation
 
 - Everything you paste is saved and accumulates into a reusable library.
 - You can **browse, search, reuse** a past recipe in a new week, **tag favorites,
-  rename, and delete**.
+  rename, and delete**. Deleting is offered both in the library list and at the
+  bottom of the edit page — the editor is usually where you find out a recipe
+  isn't worth keeping. It asks first, and says how many planned nights go with
+  it, because the dinner slots cascade away too.
 - The library is a first-class asset, not dead storage.
 - **Cooking mode** on a recipe holds the screen awake (Screen Wake Lock) while
   you cook, so the phone doesn't black out with wet hands. It's a toggle, off by

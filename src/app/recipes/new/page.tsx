@@ -76,7 +76,10 @@ export default function NewRecipePage() {
         setImportError(data.error ?? "Import failed.");
         return;
       }
-      router.push(`/recipes/${data.id}/edit`);
+      // `?new=1`: the import is saved but unreviewed, so the editor offers to
+      // throw it away rather than only to go back. Fetching the wrong page
+      // shouldn't leave a recipe behind.
+      router.push(`/recipes/${data.id}/edit?new=1`);
     } catch {
       setImportError("Import failed — check the URL and try again.");
     } finally {

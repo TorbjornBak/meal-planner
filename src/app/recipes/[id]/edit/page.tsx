@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { estimateTotalMinutes } from "@/lib/durations";
 import { MAX_IMAGE_BYTES } from "@/lib/recipeImage";
@@ -69,8 +69,24 @@ export default function EditRecipePage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  // A URL import lands here already saved — the importer has to put the page
+  // it fetched somewhere before you can review it (§1) — so `?new=1` marks the
+  // recipe as one nobody has approved yet. That turns Cancel into a real
+  // cancel: the unreviewed draft goes away instead of quietly joining the
+  // library.
+  const isNewImport = useSearchParams().get("new") === "1";
   const [form, setForm] = useState<RecipeForm | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Deleting lives here rather than only in the library list because the
+  // editor is where you find out a recipe isn't worth keeping — a bad parse,
+  // a duplicate import, a dish nobody liked. Two steps, and the second one
+  // says what goes with it, because this is the one edit that can't be undone.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  /** Nights this recipe is currently planned on; they cascade away with it. */
+  const [plannedNights, setPlannedNights] = useState(0);
 
   // Photo state is separate from the form: it saves immediately rather than on
   // "Save changes", because it's a binary body, not part of the JSON PATCH.
@@ -86,6 +102,7 @@ export default function EditRecipePage({
       .then((r) => r.json())
       .then((r) => {
         setHasPhoto(Boolean(r.imageMime || r.imageUrl));
+        setPlannedNights(r._count?.dinnerSlots ?? 0);
         setForm({
           name: r.name,
           // A recipe saved before drinks existed has no kind on the wire only
@@ -220,6 +237,30 @@ export default function EditRecipePage({
     }
   }
 
+  /**
+   * Delete the recipe and go somewhere it still makes sense to be — never back
+   * to the recipe page, which would 404. `back` is where that is: the library
+   * after a deliberate delete, the add-a-recipe page after discarding an
+   * import, since a discarded import usually means "wrong page, try another".
+   */
+  async function deleteRecipe(back: string) {
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/recipes/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        setDeleteError("Couldn't delete that recipe — try again.");
+        return;
+      }
+      router.push(back);
+      router.refresh();
+    } catch {
+      setDeleteError("Couldn't delete that recipe — try again.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (!form) return <p className="muted">Loading…</p>;
 
   const methodEstimate = estimateTotalMinutes(form.instructions);
@@ -227,9 +268,25 @@ export default function EditRecipePage({
   return (
     <>
       <p>
-        <Link href={`/recipes/${id}`}>← Cancel</Link>
+        {isNewImport ? (
+          <button
+            className="muted"
+            onClick={() => deleteRecipe("/recipes/new")}
+            disabled={deleting}
+          >
+            {deleting ? "Discarding…" : "← Cancel, don’t keep this recipe"}
+          </button>
+        ) : (
+          <Link href={`/recipes/${id}`}>← Cancel</Link>
+        )}
       </p>
-      <h1>Edit recipe</h1>
+      <h1>{isNewImport ? "Review the recipe we fetched" : "Edit recipe"}</h1>
+      {isNewImport && (
+        <p className="muted">
+          Nothing here has been checked by a human yet — correct whatever the
+          parser got wrong, then save it to your library. Cancel throws it away.
+        </p>
+      )}
 
       <div className="card">
         <label>
@@ -464,8 +521,67 @@ export default function EditRecipePage({
       </div>
 
       <button onClick={save} disabled={busy}>
-        {busy ? "Saving…" : "Save changes"}
+        {busy ? "Saving…" : isNewImport ? "Save to library" : "Save changes"}
       </button>
+
+      {/* Not shown while reviewing a fresh import: Cancel already throws that
+          one away, and two buttons for the same irreversible thing is one too
+          many. */}
+      {!isNewImport && (
+      <div className="card" style={{ marginTop: 24 }}>
+        <h2>Delete recipe</h2>
+        {confirmingDelete ? (
+          <>
+            <p>
+              Delete <strong>{form.name || "this recipe"}</strong>? Its
+              ingredients and method go with it, and this can&rsquo;t be undone.
+              {plannedNights > 0 && (
+                <>
+                  {" "}
+                  It&rsquo;s planned on {plannedNights}{" "}
+                  {plannedNights === 1 ? "night" : "nights"} — deleting takes it
+                  off {plannedNights === 1 ? "that night" : "those nights"} too.
+                </>
+              )}
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => deleteRecipe("/recipes")} disabled={deleting}>
+                {deleting ? "Deleting…" : "Yes, delete it"}
+              </button>
+              <button
+                className="muted"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+              >
+                Keep it
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="muted">
+              Removes it from the library for good. Any unsaved edits above go
+              with it.
+            </p>
+            <button className="muted" onClick={() => setConfirmingDelete(true)}>
+              Delete recipe
+            </button>
+          </>
+        )}
+        {deleteError && (
+          <p className="muted" style={{ color: "var(--accent)" }}>
+            {deleteError}
+          </p>
+        )}
+      </div>
+      )}
+      {/* The discard link at the top has nowhere of its own to report a
+          failure, so it borrows this line. */}
+      {isNewImport && deleteError && (
+        <p className="muted" style={{ color: "var(--accent)" }}>
+          {deleteError}
+        </p>
+      )}
     </>
   );
 }
