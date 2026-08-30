@@ -39,6 +39,8 @@ function seeded(seed) {
 
 const dinner = (id, category = null) => ({ id, kind: "DINNER", category });
 const drink = (id, category = null) => ({ id, kind: "DRINK", category });
+const side = (id, category = null) => ({ id, kind: "SIDE", category });
+const dessert = (id, category = null) => ({ id, kind: "DESSERT", category });
 
 const LIBRARY = [
   dinner("ragu", "MEAT"),
@@ -47,17 +49,25 @@ const LIBRARY = [
   dinner("omelet", "VEGETARIAN"),
   dinner("rest", null),
   drink("cortado", null),
+  // Both here on purpose, and for different reasons. A dessert can't go on a
+  // night at all; a side can, and is still not an answer to "what shall we
+  // have?" — it is the one exclusion that doesn't fall out of the plan (§2c).
+  dessert("pavlova", "VEGETARIAN"),
+  side("gronsalat", "VEGAN"),
 ];
 
 // -----------------------------------------------------------------------------
 // What may be offered
 // -----------------------------------------------------------------------------
 
-test("a drink is never suggested", () => {
-  // The card's one action is to put it on a night, and the plan is dinners
-  // only (§3). A flat white for Tuesday is worse than no suggestion.
+test("only dinners are suggested — not drinks, desserts or sides", () => {
+  // The card asks what the meal is. A flat white and a pavlova can't go on a
+  // night at all (§3), and the salad — which can — still isn't an answer to
+  // the question: you reach for a side once you know what it goes next to.
   const ids = eligibleForSuggestion(LIBRARY).map((r) => r.id);
   assert.ok(!ids.includes("cortado"));
+  assert.ok(!ids.includes("pavlova"));
+  assert.ok(!ids.includes("gronsalat"));
   assert.equal(ids.length, 5);
 });
 
@@ -75,6 +85,8 @@ test("the category filter reaches the suggestions", () => {
   );
   // And it brings the vegan-counts-as-vegetarian rule with it (§2d), rather
   // than re-deciding it here.
+  // Not the vegan salad or the vegetarian pavlova: the kind is asked first, so
+  // a category filter can never widen what may be offered.
   assert.deepEqual(
     eligibleForSuggestion(LIBRARY, { filter: "VEGETARIAN" }).map((r) => r.id),
     ["dal", "omelet"],

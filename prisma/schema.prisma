@@ -23,7 +23,19 @@ datasource db {
 /// same way, it has ingredients, a method with timers, a photo — but it is not
 /// dinner. The plan is dinners only (§3), so a morning cortado has no night to
 /// sit on, and leaving drinks in the same list meant scrolling past six coffees
-/// to find the ragù.
+/// to find the ragù. A dessert is the same argument: a pavlova belongs in the
+/// library and not on Tuesday.
+///
+/// One question with one answer, which is why these are values here rather than
+/// columns of their own. A recipe that is both a dinner and a dessert is not
+/// something the library needs to represent.
+///
+/// SIDE is the exception that proves what the column is for: it is not a
+/// dinner, but it *does* go on a night — the salad is cooked on Thursday next
+/// to the roast and bought for with it — so unlike a drink or a dessert it
+/// reaches the plan and the shopping list (§5). The column records what a
+/// recipe is; what follows from that is isPlannable / isSuggestable in
+/// src/lib/recipeKind.ts.
 ///
 /// An enum rather than a reserved tag string: `tags` is free text the household
 /// types, so "drink", "Drink" and "drinks" would all mean this and none of them
@@ -31,7 +43,9 @@ datasource db {
 /// plannable before offering it.
 enum RecipeKind {
   DINNER
+  SIDE
   DRINK
+  DESSERT
 }
 
 /// What a recipe is *made of*, at the level a household decides on (§2d).
@@ -60,8 +74,8 @@ enum RecipeCategory {
 model Recipe {
   id                  String           @id @default(cuid())
   name                String
-  /// Dinner or drink (§2c). Defaults to DINNER so every recipe that existed
-  /// before drinks did stays exactly where its household left it.
+  /// Dinner, side, drink or dessert (§2c). Defaults to DINNER so every recipe
+  /// that existed before the sections did stays where its household left it.
   kind                RecipeKind       @default(DINNER)
   /// What it's made of (§2d) — the filter behind "what shall we have?".
   ///

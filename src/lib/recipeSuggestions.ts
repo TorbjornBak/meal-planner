@@ -20,7 +20,7 @@
  * `npm test` runs this straight through Node.
  */
 
-import { isPlannable, type RecipeKind } from "./recipeKind.ts";
+import { isSuggestable, type RecipeKind } from "./recipeKind.ts";
 import { matchesCategoryFilter, type CategoryFilter, type RecipeCategory } from "./recipeCategory.ts";
 
 /**
@@ -32,7 +32,7 @@ export const DEFAULT_SUGGESTION_COUNT = 3;
 /** What the picker needs to know about a recipe. Everything else is the UI's. */
 export interface SuggestibleRecipe {
   id: string;
-  /** Dinner or drink (§2c) — only one of them can be suggested. */
+  /** What it is (§2c) — only a dinner can be suggested. */
   kind: RecipeKind;
   /** What it's made of (§2d), or null if nobody has said. */
   category: RecipeCategory | null;
@@ -56,10 +56,13 @@ export interface SuggestionOptions {
  *
  * Two exclusions, both of them the difference between a suggestion and noise:
  *
- * **Drinks are out.** The question is what to eat, the card's one action is to
- * put it on a night, and the plan is dinners only (§3). `isPlannable` is asked
- * rather than `kind === "DINNER"` compared, so the day a third kind arrives
- * this screen inherits whatever §2c decides about it.
+ * **Everything that isn't dinner is out.** The question is what the meal is, so
+ * a drink and a dessert are obviously not answers — and neither is a side,
+ * though that one can go on a night. A card offering two stews and a green
+ * salad has answered a question nobody asked; you reach for a side once you
+ * know what it is going next to. `isSuggestable` is asked rather than
+ * `kind === "DINNER"` compared, so the day a fifth kind arrives this screen
+ * inherits whatever §2c decides about it.
  *
  * **This week's dinners are out.** A recipe you have already committed to
  * Thursday is the one thing on the shelf that is definitely not an answer to
@@ -78,7 +81,7 @@ export function eligibleForSuggestion<R extends SuggestibleRecipe>(
   const filter = options.filter ?? "ANY";
   return recipes.filter(
     (r) =>
-      isPlannable(r.kind) &&
+      isSuggestable(r.kind) &&
       !planned.has(r.id) &&
       matchesCategoryFilter(r.category, filter),
   );

@@ -33,7 +33,8 @@ src/lib/                  Core logic:
   importRecipe.ts           parse HTML + download photo → saved draft (§1, §2b)
   image.ts                  download a recipe photo, private-network guarded (§2b)
   durations.ts              cook times out of a step, for the timers (§2)
-  recipeKind.ts             dinner or drink: the library's two sections (§2c)
+  recipeKind.ts             dinner / side / dessert / drink, and what each
+                            one may do: the library's sections (§2c)
   recipeCategory.ts         meat / fish / vegetarian / vegan (§2d)
   recipeSuggestions.ts      the dashboard's random dinners (§2e)
   scaling.ts                recipe scaling to household size (§4)

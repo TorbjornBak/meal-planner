@@ -14,7 +14,7 @@ import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
 import { nightNoteLabel, type NightNote } from "@/lib/nightNotes";
 import { searchRecipes } from "@/lib/recipeSearch";
-import { isPlannable, type RecipeKind } from "@/lib/recipeKind";
+import { isPlannable, isSuggestable, kindLabel, type RecipeKind } from "@/lib/recipeKind";
 import { dinnerPlace, moveDinner } from "@/lib/planMove";
 import { useDinnerDrag, type DropTarget } from "./useDinnerDrag";
 
@@ -74,7 +74,7 @@ interface WeekPlan {
 interface RecipeOption {
   id: string;
   name: string;
-  /** Dinner or drink (§2c) — only dinners get offered as a night's dinner. */
+  /** What it is (§2c) — only what a night can hold gets offered here. */
   kind: RecipeKind;
   imageMime: string | null;
   imageUrl: string | null;
@@ -162,11 +162,11 @@ function PlanCalendar() {
   useEffect(() => {
     fetch("/api/recipes")
       .then((r) => r.json())
-      // The plan is dinners only (§3), so the picker never sees the drinks
-      // (§2c). Filtered here, on arrival, rather than in the picker: nothing
-      // else on this page has any use for a recipe it can't put on a night,
-      // and a filter one layer down is a filter somebody adds a second
-      // consumer to and forgets.
+      // A night holds dinners and the sides that go with them, so the picker
+      // never sees the drinks or the desserts (§2c). Filtered here, on
+      // arrival, rather than in the picker: nothing else on this page has any
+      // use for a recipe it can't put on a night, and a filter one layer down
+      // is a filter somebody adds a second consumer to and forgets.
       .then((rs: RecipeOption[]) => setRecipes(rs.filter((r) => isPlannable(r.kind))));
   }, []);
 
@@ -835,7 +835,10 @@ function PlanCalendar() {
           <div className="picker-body">
             <div className="picker-head">
               <h2 className="picker-title">
-                Add dinner — {DAYS[pickerDay]}{" "}
+                {/* "Add to", not "Add dinner": the list below holds the
+                    sides as well, and a salad under a heading promising
+                    dinners reads as the search having gone wrong (§2c). */}
+                Add to {DAYS[pickerDay]}{" "}
                 {dayNumber(addDays(weekStart, pickerDay))}
               </h2>
               <button
@@ -897,6 +900,15 @@ function PlanCalendar() {
                   >
                     <span className="picker-option-name">
                       {match.recipe.name}
+                      {/* Mains are the default and go unlabelled; everything
+                          else on this list says what it is, because "Grøn
+                          salat" between two stews should read as the side it
+                          is rather than as tonight's dinner (§2c). */}
+                      {!isSuggestable(match.recipe.kind) && (
+                        <span className="picker-option-kind">
+                          {kindLabel(match.recipe.kind)}
+                        </span>
+                      )}
                     </span>
                     {/* Why this one turned up, when the name doesn't say. */}
                     {match.matchedIngredients.length > 0 && (
