@@ -14,6 +14,7 @@ import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
 import { nightNoteLabel, type NightNote } from "@/lib/nightNotes";
 import { searchRecipes } from "@/lib/recipeSearch";
+import { isPlannable, type RecipeKind } from "@/lib/recipeKind";
 import { dinnerPlace, moveDinner } from "@/lib/planMove";
 import { useDinnerDrag, type DropTarget } from "./useDinnerDrag";
 
@@ -73,6 +74,8 @@ interface WeekPlan {
 interface RecipeOption {
   id: string;
   name: string;
+  /** Dinner or drink (§2c) — only dinners get offered as a night's dinner. */
+  kind: RecipeKind;
   imageMime: string | null;
   imageUrl: string | null;
   /**
@@ -159,7 +162,12 @@ function PlanCalendar() {
   useEffect(() => {
     fetch("/api/recipes")
       .then((r) => r.json())
-      .then(setRecipes);
+      // The plan is dinners only (§3), so the picker never sees the drinks
+      // (§2c). Filtered here, on arrival, rather than in the picker: nothing
+      // else on this page has any use for a recipe it can't put on a night,
+      // and a filter one layer down is a filter somebody adds a second
+      // consumer to and forgets.
+      .then((rs: RecipeOption[]) => setRecipes(rs.filter((r) => isPlannable(r.kind))));
   }, []);
 
   useEffect(() => {

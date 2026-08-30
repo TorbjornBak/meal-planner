@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+// Imported relatively, with its extension, so the round-trip test can run this
+// module straight through Node — the `@/` alias only exists inside the bundler.
+import { DEFAULT_RECIPE_KIND, RECIPE_KINDS, type RecipeKind } from "./recipeKind.ts";
+
 /**
  * The recipe-library transfer file (§2, §11) — one shape, seen from both sides.
  *
@@ -48,6 +52,11 @@ export interface TransferIngredient {
 
 export interface TransferRecipe {
   name: string;
+  /**
+   * Dinner or drink (§2c). Absent in files written before drinks existed, and
+   * read as DINNER — which is what every recipe in such a file is.
+   */
+  kind: RecipeKind;
   source: string | null;
   statedServings: number;
   instructions: string | null;
@@ -79,6 +88,7 @@ export interface RecipeTransferFile {
 /** What a recipe row looks like coming out of Prisma, for the export side. */
 export interface RecipeRowForTransfer {
   name: string;
+  kind: RecipeKind;
   source: string | null;
   statedServings: number;
   instructions: string | null;
@@ -115,6 +125,7 @@ export interface RecipeRowForTransfer {
 export function toTransferRecipe(row: RecipeRowForTransfer): TransferRecipeWithLines {
   return {
     name: row.name,
+    kind: row.kind ?? DEFAULT_RECIPE_KIND,
     source: row.source ?? null,
     statedServings: row.statedServings,
     instructions: row.instructions ?? null,
@@ -177,6 +188,10 @@ const TransferIngredientSchema = z.object({
 
 const TransferRecipeSchema = z.object({
   name: z.string().min(1).max(300),
+  // Defaulted rather than required, because a file older than drinks is a
+  // perfectly good file — and a hand-written one shouldn't have to say
+  // `"kind": "DINNER"` on every entry to be read.
+  kind: z.enum(RECIPE_KINDS).default(DEFAULT_RECIPE_KIND),
   source: z.string().max(2000).nullable().default(null),
   statedServings: z.number().int().positive().max(1000),
   instructions: z.string().nullable().default(null),
@@ -313,6 +328,7 @@ export function transferKey(name: string, source: string | null | undefined): st
 export function toRecipeCreateData(recipe: TransferRecipeWithLines) {
   return {
     name: recipe.name.trim(),
+    kind: recipe.kind,
     source: recipe.source,
     instructions: recipe.instructions,
     statedServings: recipe.statedServings,

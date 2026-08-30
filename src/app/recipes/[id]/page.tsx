@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { formatDurationMinutes } from "@/lib/durations";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS, recipeImageSrc } from "@/lib/recipeImage";
+import { yieldNoun } from "@/lib/recipeKind";
 import { CookingMode } from "./CookingMode";
 import { Method } from "./Method";
 
@@ -82,7 +83,9 @@ export default async function RecipeDetailPage({
         {recipe.name}
       </h1>
       <p className="muted">
-        Serves {recipe.statedServings}
+        {/* "Serves 1" on a cortado reads like an apology; a drink *makes* one
+            (§2c). */}
+        {yieldNoun(recipe.kind)} {recipe.statedServings}
         {recipe.totalTimeMinutes != null ? (
           <>
             {" · "}

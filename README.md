@@ -33,6 +33,7 @@ src/lib/                  Core logic:
   importRecipe.ts           parse HTML + download photo → saved draft (§1, §2b)
   image.ts                  download a recipe photo, private-network guarded (§2b)
   durations.ts              cook times out of a step, for the timers (§2)
+  recipeKind.ts             dinner or drink: the library's two sections (§2c)
   scaling.ts                recipe scaling to household size (§4)
   shopping.ts               merge + pantry aggregation (§5)
   keys.ts                   ingredient-name normalization for merge/diff/pantry

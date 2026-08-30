@@ -133,6 +133,39 @@ table {
   border-collapse: collapse;
 }
 
+/* --- Recipe sections: dinners / drinks (§2c) -------------------------------- */
+
+/* An underlined tab strip rather than pill buttons: the sections are two views
+   of one list, and the list starts immediately below them. */
+.recipe-kind-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin: 0.5rem 0 1rem;
+}
+.recipe-kind-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.5rem 0.9rem;
+  font-size: 1rem;
+  cursor: pointer;
+  color: inherit;
+  /* Sits on the container's border rather than above it, so the selected tab
+     joins the content instead of floating over a line. */
+  margin-bottom: -1px;
+}
+.recipe-kind-tab.is-selected {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.recipe-kind-tab .muted {
+  font-weight: 400;
+  font-size: 0.85em;
+}
+
 /* --- Recipe photos --------------------------------------------------------- */
 
 .recipe-hero {

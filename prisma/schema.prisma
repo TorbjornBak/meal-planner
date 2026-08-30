@@ -16,10 +16,31 @@ datasource db {
 // Recipe library (§1, §2)
 // -----------------------------------------------------------------------------
 
+/// What a recipe *is*, which decides where it lives and what can be done with
+/// it (§2c).
+///
+/// A drink is a recipe in every way that matters — it is pasted and parsed the
+/// same way, it has ingredients, a method with timers, a photo — but it is not
+/// dinner. The plan is dinners only (§3), so a morning cortado has no night to
+/// sit on, and leaving drinks in the same list meant scrolling past six coffees
+/// to find the ragù.
+///
+/// An enum rather than a reserved tag string: `tags` is free text the household
+/// types, so "drink", "Drink" and "drinks" would all mean this and none of them
+/// could be relied on by the plan picker, which has to be *sure* a recipe is
+/// plannable before offering it.
+enum RecipeKind {
+  DINNER
+  DRINK
+}
+
 /// Everything pasted-and-parsed is saved here and accumulates into the library.
 model Recipe {
   id                  String           @id @default(cuid())
   name                String
+  /// Dinner or drink (§2c). Defaults to DINNER so every recipe that existed
+  /// before drinks did stays exactly where its household left it.
+  kind                RecipeKind       @default(DINNER)
   /// Where it came from (URL or free text). Optional — pasted plans may lack one.
   source              String?
   /// The method/steps text, captured at parse time for the cooking view (§2).
@@ -58,6 +79,7 @@ model Recipe {
   updatedAt           DateTime         @updatedAt
 
   @@index([isFavorite])
+  @@index([kind])
 }
 
 /// One "name / quantity / unit" line belonging to a recipe. Corrected by the

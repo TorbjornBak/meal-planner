@@ -82,6 +82,25 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   pasted URL nor a page-declared image URL can be used to probe the host's own
   network. The bookmarklet path still sends content straight from your browser.
 
+## 2c. Drinks — a second section in the library
+
+- The library holds **dinners and drinks**, in two sections you switch between:
+  coffee ratios, cordials, gløgg, the punch somebody makes at Christmas.
+- **A drink is a recipe in every way that matters.** Same paste-and-parse (§1),
+  same mandatory review, same ingredients, same method with working timers, same
+  photo. It differs in one respect only: it isn't dinner.
+- **The plan stays dinners only** (§3), so a drink never appears in the night
+  picker and never goes on a night. Everything downstream follows from that:
+  a drink has no "last cooked" week, and its ingredients don't reach the
+  aggregated shopping list (§5) — coffee beans go on the list by hand, like
+  kitchen roll.
+- **Which it is, is a field, not a tag.** Tags are free text the household types,
+  so "drink", "Drink" and "drinks" would all mean this and none of them could be
+  relied on by the picker, which has to be *certain* before offering something as
+  tonight's dinner. It's set in the review step and changed on the edit page like
+  any other parsed field.
+- **The wording follows the kind.** A stew serves four; a cortado makes one.
+
 ## 4. Scaling — one household-size setting
 
 - A single "household size" setting scales every recipe from its stated servings to
@@ -218,8 +237,9 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## Data model sketch
 
-- **Recipe** — name, source, stated servings, tags/favorite flag, ingredient lines,
-  and an optional photo (bytes + MIME type, plus the URL it came from).
+- **Recipe** — name, kind (dinner or drink, §2c), source, stated servings,
+  tags/favorite flag, ingredient lines, and an optional photo (bytes + MIME type,
+  plus the URL it came from).
 - **Ingredient line** — name, quantity, unit (belongs to a Recipe).
 - **WeekPlan** — week identifier + its dinner slots. Each slot pins a Recipe to a night
   (with an optional per-slot servings override and an ordering position); a night may

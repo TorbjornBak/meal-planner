@@ -5,6 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { estimateTotalMinutes } from "@/lib/durations";
 import { MAX_IMAGE_BYTES } from "@/lib/recipeImage";
+import {
+  DEFAULT_RECIPE_KIND,
+  RECIPE_KINDS,
+  kindLabel,
+  yieldNoun,
+  type RecipeKind,
+} from "@/lib/recipeKind";
 
 // Full recipe editor (§2). Edit name, source, servings, ingredients (add/remove
 // rows), the method, and the photo. Backed by PATCH /api/recipes/[id] and
@@ -28,6 +35,8 @@ function minutesFromInput(value: string): number | null {
 
 interface RecipeForm {
   name: string;
+  /** Which section of the library it lives in (§2c) — dinner or drink. */
+  kind: RecipeKind;
   source: string | null;
   instructions: string | null;
   statedServings: number;
@@ -66,6 +75,10 @@ export default function EditRecipePage({
         setHasPhoto(Boolean(r.imageMime || r.imageUrl));
         setForm({
           name: r.name,
+          // A recipe saved before drinks existed has no kind on the wire only
+          // if this instance is talking to an older API; the column itself
+          // defaults, so this is belt and braces.
+          kind: r.kind ?? DEFAULT_RECIPE_KIND,
           source: r.source,
           instructions: r.instructions,
           statedServings: r.statedServings,
@@ -213,7 +226,22 @@ export default function EditRecipePage({
         </label>
         <div style={{ marginTop: 8, display: "flex", gap: 16, flexWrap: "wrap" }}>
           <label>
-            Serves{" "}
+            {/* Reclassifying is an ordinary edit (§2c): the URL import can't
+                know a page is a coffee recipe, so this is where it gets said. */}
+            Kind{" "}
+            <select
+              value={form.kind}
+              onChange={(e) => setForm({ ...form, kind: e.target.value as RecipeKind })}
+            >
+              {RECIPE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {kindLabel(k)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {yieldNoun(form.kind)}{" "}
             <input
               type="number"
               min={1}
