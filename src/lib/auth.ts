@@ -48,6 +48,20 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * Whether an `Authorization: Bearer …` header carries the expected secret.
+ *
+ * For the endpoints a script calls rather than a browser: they have no cookie
+ * jar, so they present a shared secret instead. An unset secret matches
+ * nothing, so forgetting to configure one closes the endpoint rather than
+ * opening it.
+ */
+export function bearerTokenMatches(header: string | null, secret: string | undefined): boolean {
+  if (!secret) return false;
+  const presented = header?.startsWith("Bearer ") ? header.slice(7) : "";
+  return safeEqual(presented, secret);
+}
+
 function toHex(buf: ArrayBuffer): string {
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, "0"))

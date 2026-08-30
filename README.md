@@ -47,6 +47,13 @@ src/lib/                  Core logic:
   password.ts               scrypt password hashing (§9)
   currentUser.ts            the signed-in user inside a request (§9)
   mail.ts                   SMTP transport, your own server (§9, §9b)
+  backupSchedule.ts         which day's backup is owed, pure + tested (§11)
+  borgConfig.ts             backup settings and the borg commands they build (§11)
+  borgError.ts              a failed backup, as something to go and fix (§11)
+  borg.ts                   running borg and pg_dump (§11)
+  backups.ts                taking backups and recording what happened (§11)
+  pgConnection.ts           DATABASE_URL, as pg_dump wants it (§11)
+  wallClock.ts              wall-clock time in a named zone, for both schedules
   emailLayout.ts            dependency-free email HTML primitives
   emails.ts                 reset / invitation / password-changed templates (§9)
   newsletter.ts             weekly digest composition, pure + tested (§9b)
@@ -58,10 +65,9 @@ src/app/                  App Router pages (dashboard, plan, recipes,
 src/app/api/             Route handlers (parse, import, capture, recipes, plan,
                           shopping, pantry, trips, receipts/ocr, settings,
                           login, logout, setup, account, users, password/*,
-                          newsletter/*)
+                          newsletter/*, backup/*)
 src/middleware.ts        Gates every route behind a signed-in account (§9)
 tessdata/                Vendored Tesseract language model for receipt OCR (§7)
-scripts/backup.sh        Nightly Borg backup to a Hetzner Storage Box (§11)
 ```
 
 ## Local development
@@ -83,12 +89,17 @@ the TypeScript directly).
 
 ## Production (home box via Tailscale)
 
-- `docker compose up -d --build` brings up app + Postgres. The app listens on
-  `127.0.0.1:3000`.
+- Deploys are automatic: push to `main` and Forgejo Actions builds, publishes
+  and restarts the stack (see [CI/CD](#cicd-forgejo-actions)). The commands
+  below are for bootstrapping the box the first time, or for bringing it up by
+  hand when CI is not an option.
+- `docker compose up -d --build` brings up app + Postgres from this checkout.
+  The app listens on `127.0.0.1:3000`.
 - Expose it over HTTPS on the tailnet with `tailscale serve --bg 3000`
   (tailscaled runs on the host). No reverse proxy or cert management (§10).
 - Migrations run automatically on container start (`prisma migrate deploy`).
-- Schedule `scripts/backup.sh` nightly (§11).
+- Set up backups from Settings → Backups (§11). There is no crontab: the app
+  takes them itself and tells you whether they worked.
 
 ## Accounts and email (§9, §9b)
 
@@ -180,10 +191,119 @@ curl -sS -X POST -H "Authorization: Bearer <your CRON_SECRET>" \
 
 It returns a JSON report naming who it sent to and why it skipped anyone else.
 
+## Backups (§11)
+
+Everything the household has is in Postgres — recipes, the plan, the ledger,
+receipt photos and all. A home box is one dead disk away from losing it, so the
+app takes a **Borg** backup every night, on its own schedule, and says on the
+settings screen whether it worked. **There is no crontab to set up.**
+
+Archives are deduplicated, compressed and encrypted before they leave the box.
+A nightly full dump therefore costs about what changed that day.
+
+### Setting it up
+
+Settings → Backups walks through it, in this order:
+
+1. **Point it at a repository.** Anywhere you can reach over SSH that has borg
+   installed; a Hetzner Storage Box is the cheap one. Note the port and the
+   `/./`, which means "relative to the login's home directory" — the two
+   mistakes the screen will otherwise catch for you:
+
+   ```
+   BORG_REPO="ssh://u123456@u123456.your-storagebox.de:23/./mealplanner"
+   ```
+
+2. **Choose a passphrase.** It encrypts the repository, and it is the *only*
+   thing that can decrypt it. The screen can generate one in your browser. Put
+   it in `.env` as `BORG_PASSPHRASE` **and write it down somewhere that is not
+   this box.** It is deliberately never stored in the database — that being the
+   thing you would need it to restore.
+
+3. Restart the app so it picks both up: `docker compose up -d`.
+
+4. **Generate a key** on the settings screen and add the public key it shows to
+   the backup host (on a Storage Box, its SSH-keys screen). The app keeps the
+   private half in a volume; only the public half is ever shown.
+
+5. **Create the repository**, then **Back up now**. Borg refuses to initialise
+   over an existing repository, so that button can't overwrite anything.
+
+From then on it runs at 03:00 in `BACKUP_TIMEZONE`, and the log says so at
+startup:
+
+```
+[backup] nightly backup scheduled for 03:00 Europe/Copenhagen → u123456.your-storagebox.de
+```
+
+If that line is missing, `docker compose logs app | grep backup` will say why
+(not configured, or `BACKUP_SCHEDULER=off`).
+
+| Variable | Default | |
+| --- | --- | --- |
+| `BORG_REPO` | — | Required. Where the archives go. |
+| `BORG_PASSPHRASE` | — | Required. Keep a copy off the box. |
+| `BACKUP_HOUR` | `3` | `0`–`23`, a wall clock in `BACKUP_TIMEZONE`. |
+| `BACKUP_TIMEZONE` | `Europe/Copenhagen` | Falls back to `TZ`. |
+| `BACKUP_SCHEDULER` | `on` | `off` to stop backing up on its own. |
+| `BACKUP_KEEP_DAILY` / `_WEEKLY` / `_MONTHLY` | `7` / `4` / `6` | Retention. |
+
+Like the digest, the schedule asks whether a backup **is owed** rather than
+whether the hour has struck, and re-asks every 15 minutes. A box that was off at
+03:00 backs up when it comes back, and a failed attempt is retried within the
+hour instead of being written off until tomorrow.
+
+`POST /api/backup/run` takes one by hand, with `CRON_SECRET` instead of a
+session, for anyone who'd rather drive it from the host:
+
+```sh
+curl -sS -X POST -H "Authorization: Bearer <your CRON_SECRET>" \
+  https://box.your-tailnet.ts.net/api/backup/run
+```
+
+### Restoring
+
+The app container has borg, the key and the settings already, so a restore from
+the box is three commands:
+
+```sh
+docker compose exec app borg list
+docker compose exec app borg extract --stdout ::mealplanner-2026-08-30T01-00-00Z mealplanner.sql > mealplanner.sql
+docker compose exec -T db psql -U mealplanner -d mealplanner < mealplanner.sql
+```
+
+The dump is plain SQL, taken with `--clean --if-exists`, so it restores over the
+database that's already there and needs nothing but `psql`.
+
+**If the box itself is gone**, you need two things that must live somewhere
+else: the passphrase, and a way to log in to the backup host now that this
+box's key is gone (for a Storage Box, the account password). With those, borg on
+any machine reads the archives — the encryption key is stored inside the
+repository, not on the box.
+
+### When a backup won't run
+
+The settings screen reports the actual error with the setting to go and check.
+The common ones:
+
+| What you see | Usually means |
+| --- | --- |
+| `Permission denied (publickey)` | The public key isn't installed on the backup host yet. |
+| `Connection refused` on port 22 | A Storage Box listens on **23**. |
+| `Repository does not exist` | Press *Create the repository*. |
+| `passphrase … is incorrect` | `BORG_PASSPHRASE` changed. Put the old value back — a new one doesn't re-encrypt anything, it just stops the archives opening. |
+| `Failed to create/acquire the lock` | A run was interrupted. `docker compose exec app borg break-lock`. |
+| `borg: not found` | The container predates backups. `docker compose up -d --build`. |
+
 ## CI/CD (Forgejo Actions)
 
-Both the Forgejo instance and its runner live on the same home server as the
-app, so there is no registry round-trip over the network and nothing needs
+Pushing to `main` is the deploy: the workflow builds the image, publishes it
+and restarts the stack. Nothing is deployed by hand.
+
+Forgejo itself runs on the `git` tailnet node, but **the runner belongs on the
+box the app runs on** — the deploy job writes to `/srv/mealplanner`, talks to
+that host's Docker daemon and polls `127.0.0.1:3000`, none of which mean
+anything anywhere else. The runner polls Forgejo outbound, so nothing needs
 inbound access.
 
 - `.forgejo/workflows/ci.yml` — typechecks every push and PR outside `main`.
@@ -195,18 +315,33 @@ inbound access.
 
 ### One-time setup
 
-1. **Runner in host mode.** Register a runner with the `self-hosted` and
-   `docker` labels; the `self-hosted` label must map to `host` so deploy jobs
-   use the host Docker daemon. The runner's user needs to be in the `docker`
-   group, and `git`, `curl` and `node` must be on its PATH.
+1. **Runner in host mode,** installed on the app host. Create it in the web UI
+   (repo Settings → Actions → Runners → *Create new runner*), which hands back a
+   UUID and a secret; put those in the runner's config under
+   `server.connections` — the `forgejo-runner register` subcommand is deprecated
+   as of runner v13. Labels go in the same file:
+
+   ```yaml
+   runner:
+     labels:
+       - docker:docker://node:22-bookworm
+       - self-hosted:host
+   ```
+
+   `self-hosted` must be the `host` type so deploy jobs use the host Docker
+   daemon. The runner's user needs to be in the `docker` group, and `git`,
+   `curl` and `node` must be on its PATH.
 2. **Deploy directory.** `mkdir -p /srv/mealplanner` and put the production
    `.env` there (`AUTH_SECRET`, `POSTGRES_*`, and for email `SMTP_*`,
    `MAIL_FROM`, `APP_URL`, `CRON_SECRET`). It is never overwritten by a deploy —
    only `docker-compose.yml` is synced.
 3. **Registry access.** Enable the Forgejo package registry, then in the repo
    settings add:
-   - variable `REGISTRY_HOST` — the Forgejo host, e.g. `forgejo.example.ts.net`
+   - variable `REGISTRY_HOST` — the Forgejo host, e.g. `git.example.ts.net`
    - secret `REGISTRY_TOKEN` — an access token with `write:package` scope
+
+   The image reference is lowercased in the workflow before use: Docker refuses
+   a tag with uppercase in it, and the repository owner has capitals.
 4. **Existing data.** The compose project is pinned to `name: mealplanner`, so
    the Postgres volume stays `mealplanner_pgdata`. If your current stack was
    started from a directory with a different name, rename the existing volume

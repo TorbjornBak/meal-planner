@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AccountCard } from "./AccountCard";
+import { BackupCard } from "./BackupCard";
 import { HouseholdCard } from "./HouseholdCard";
 
-// Settings (§4, §9) — household size (scales every recipe), your own account,
-// and who else is in the household. The pantry list (§5) has its own page; all
-// that lives here is the way in.
+// Settings (§4, §9, §11) — household size (scales every recipe), your own
+// account, who else is in the household, and whether any of it is backed up.
+// The pantry list (§5) has its own page; all that lives here is the way in.
 
 export default function SettingsPage() {
   const [householdSize, setHouseholdSize] = useState<number | "">("");
@@ -236,6 +237,7 @@ export default function SettingsPage() {
 
       <AccountCard />
       <HouseholdCard />
+      <BackupCard />
     </>
   );
 }

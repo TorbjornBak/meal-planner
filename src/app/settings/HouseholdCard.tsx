@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MailDiagnosis, type Diagnosis } from "./MailDiagnosis";
+import { DiagnosisPanel, type Diagnosis } from "./Diagnosis";
 
 /**
  * The household roster (§9).
@@ -206,7 +206,7 @@ export function HouseholdCard() {
 
       {note && <p className="muted">{note}</p>}
       {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-      {diagnosis && <MailDiagnosis d={diagnosis} />}
+      {diagnosis && <DiagnosisPanel d={diagnosis} />}
 
       {undelivered && (
         <div

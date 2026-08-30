@@ -30,6 +30,9 @@ function isPublic(pathname: string): boolean {
     // The weekly send is triggered by cron and authenticates with CRON_SECRET
     // instead of a cookie (§9b).
     pathname === "/api/newsletter/send" ||
+    // Backups can likewise be driven from a script with CRON_SECRET rather
+    // than a session (§11). The route checks one or the other itself.
+    pathname === "/api/backup/run" ||
     // Capture is cross-origin from the recipe site and authenticates with the
     // household capture token instead of the session cookie.
     pathname === "/api/capture" ||

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MailDiagnosis, type Diagnosis } from "./MailDiagnosis";
+import { DiagnosisPanel, type Diagnosis } from "./Diagnosis";
 
 /**
  * Your own account (§9) — name, email, password, and the weekly digest
@@ -255,7 +255,7 @@ export function AccountCard() {
           </p>
         )}
 
-        {mailCheck && <MailDiagnosis d={mailCheck} ok={mailCheck.ok} />}
+        {mailCheck && <DiagnosisPanel d={mailCheck} ok={mailCheck.ok} />}
       </div>
     </>
   );
