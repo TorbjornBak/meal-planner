@@ -130,6 +130,12 @@ The full error is also in the app log (`docker compose logs app`).
 
 ### Weekly newsletter
 
+One mail a week, looking both ways: ahead to the coming week's dinners and the
+recipes added in the last seven days, and behind at what got cooked in the week
+now ending and what the shopping came to — compared with the four weeks before
+it, once there's enough ledger behind it to be worth comparing against (§7, §8).
+The forward half leads, because it's the half somebody has to act on tonight.
+
 The app schedules the digest itself — **there is no crontab to set up.** Friday
 17:00 by default, which suits a weekend shop: the digest looks ahead to the
 coming Monday, while there's still time to fill the empty nights in.
@@ -149,8 +155,8 @@ just struck, and re-asks every 15 minutes until it isn't. So a box that was off
 at 17:00 on Friday sends when it comes back, and a member whose delivery failed
 — a mail server having a moment, say — is retried on the next tick rather than
 missing the week. Delivery is recorded per member per week, so none of that can
-send twice. A week with no dinners, no settled nights and no new recipes isn't
-sent at all.
+send twice. A week with nothing ahead of it, nothing new in the library *and*
+nothing behind it isn't sent at all.
 
 On startup the log says what it's doing:
 

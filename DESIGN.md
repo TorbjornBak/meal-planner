@@ -183,12 +183,31 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## 9b. Weekly newsletter
 
-- **One email a week** to each member who wants it: the **coming week's dinners**,
-  night by night, and the **recipes added to the library** in the last seven days.
-- It's a **nudge, not a report** — the empty nights are stated rather than
-  omitted, and the call to action counts them ("Fill in the 4 empty nights").
+- **One email a week** to each member who wants it, looking both ways:
+  - **Ahead** — the **coming week's dinners**, night by night, and the **recipes
+    added to the library** in the last seven days.
+  - **Behind** — **what got cooked** in the week now ending, and **what the
+    shopping came to**, against the four weeks before it.
+- The forward half is a **nudge, not a report** — the empty nights are stated
+  rather than omitted, and the call to action counts them ("Fill in the 4 empty
+  nights"). It leads, because it's the half somebody has to act on tonight.
+- The backward half **is** a report, and sits below a rule. The plan and the
+  ledger (§7, §8) always knew what the week held and cost; you just had to go and
+  look, and nobody opens a spending page on a Friday. Arriving unasked is the
+  only way that number gets seen.
+- **It reports the week you just lived through**, not the last complete one. The
+  mail goes out Friday evening, so the two nights still to come are counted as
+  they fall rather than held back a week — by which time nobody remembers the
+  week anyway.
+- **The comparison is only drawn when there's something to compare with.** Four
+  weeks of ledger, of which at least two contain a shop; anything younger would
+  be arithmetic about the install date. A week with no shop logged says so — that
+  nudge is worth having — but a household that has never used the ledger is never
+  told about the ledger.
 - **A week with nothing on it isn't sent.** A weekly email that regularly says
-  nothing is one people learn to ignore.
+  nothing is one people learn to ignore. Last week's cooking and spending count
+  as something: a household that cooked five dinners and simply hasn't planned
+  next week yet is the one with the most to read.
 - **Sent over your own SMTP server**, not a mail API — no account to sign up
   for, no key to leak (§12).
 - **The app schedules it**, on a timer started from Next's `instrumentation`
