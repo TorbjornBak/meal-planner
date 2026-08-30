@@ -48,8 +48,11 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 - A **calendar week** — one card per night, Monday to Sunday, with the date and
   today highlighted.
-- Each night holds **any number of dinners** — add a second dish for a big
-  night, or stack sides — each with its own photo and servings override.
+- Each night holds **any number of dinners and sides** (§2c) — a second dish for
+  a big night, the salad that goes with the roast — each with its own photo and
+  servings override. "Dinners only" is about the meal the app plans, not about
+  how many things are on the table: breakfast and lunch are still out, and so are
+  drinks and desserts, which never reach a night at all.
 - Nights can be left empty (leftovers / eating out).
 - **Dinners can be dragged from night to night.** A plan changes after it's
   made — a late meeting moves Thursday's stew to Saturday — and saying so should
@@ -82,24 +85,41 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   pasted URL nor a page-declared image URL can be used to probe the host's own
   network. The bookmarklet path still sends content straight from your browser.
 
-## 2c. Drinks — a second section in the library
+## 2c. Kinds — sections in the library
 
-- The library holds **dinners and drinks**, in two sections you switch between:
-  coffee ratios, cordials, gløgg, the punch somebody makes at Christmas.
-- **A drink is a recipe in every way that matters.** Same paste-and-parse (§1),
-  same mandatory review, same ingredients, same method with working timers, same
-  photo. It differs in one respect only: it isn't dinner.
-- **The plan stays dinners only** (§3), so a drink never appears in the night
-  picker and never goes on a night. Everything downstream follows from that:
-  a drink has no "last cooked" week, and its ingredients don't reach the
-  aggregated shopping list (§5) — coffee beans go on the list by hand, like
-  kitchen roll.
+- The library holds **dinners, sides, desserts and drinks**, in sections you
+  switch between: the mains, the salads and potatoes that go beside them, the
+  cakes, and the coffee ratios and gløgg.
+- **Each of them is a recipe in every way that matters.** Same paste-and-parse
+  (§1), same mandatory review, same ingredients, same method with working
+  timers, same photo. They differ in one respect only: what the household does
+  with them.
+- **Two questions follow from the kind, and they are not the same question.**
+  - *Can it go on a night?* Dinners and sides. A meal is the roast and the salad
+    — cooked the same evening, bought for together — so a side reaches the plan
+    (§3) and through it the aggregated shopping list (§5), exactly like a dinner,
+    and gets a "last cooked" week like one too.
+  - *Is it an answer to "what shall we have?"* (§2e) Dinners only. The dashboard
+    is asking what the meal **is**; a card coming back with two stews and a green
+    salad has answered a question nobody asked. You reach for a side once you
+    know what it is going next to.
+- **Drinks and desserts stay off the plan entirely**, so neither ever appears in
+  the night picker, neither has a "last cooked" week, and neither reaches the
+  shopping list — coffee beans and vanilla pods go on the list by hand, like
+  kitchen roll (§5, manual items).
 - **Which it is, is a field, not a tag.** Tags are free text the household types,
   so "drink", "Drink" and "drinks" would all mean this and none of them could be
   relied on by the picker, which has to be *certain* before offering something as
   tonight's dinner. It's set in the review step and changed on the edit page like
   any other parsed field.
+- **Nothing was backfilled.** The salads and cakes already filed as dinners stay
+  filed as dinners until somebody re-files them; only the household knows which
+  ones they are, and guessing from a name is the invented claim §2d refuses to
+  make about categories.
 - **The wording follows the kind.** A stew serves four; a cortado makes one.
+- **The picker names what isn't a main.** A side in the night picker's results
+  carries a small "Side" tag, because "Grøn salat" between two stews should read
+  as the side it is.
 
 ## 2d. Categories — what a recipe is made of
 
@@ -146,11 +166,12 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   Three at random out of a shelf you chose every item of is a good enough
   answer, and — unlike a score derived from your own cooking history — one you
   can explain.
-- **Dinners only, and nothing already on the week.** The card's one action is to
-  put it on a night, and the plan is dinners only (§3), so a drink is never
-  offered. Neither is a recipe already booked for this week: it's the one thing
-  on the shelf that definitely isn't an answer to "what else?", and taking the
-  offer would put it on the week twice.
+- **Dinners only, and nothing already on the week.** A drink and a dessert can't
+  go on a night at all (§3), so neither is ever offered — and neither is a side,
+  which can: the card is asking what the meal is, not what goes beside it (§2c).
+  Nor is a recipe already booked for this week: it's the one thing on the shelf
+  that definitely isn't an answer to "what else?", and taking the offer would put
+  it on the week twice.
 - **The shuffle avoids what's on screen.** Drawing uniformly every press means a
   small library hands you two of the same three back, and a button that looks
   like it didn't work is worse than no button. When there aren't enough unseen
@@ -316,7 +337,7 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## Data model sketch
 
-- **Recipe** — name, kind (dinner or drink, §2c), category (what it's made of,
+- **Recipe** — name, kind (dinner / side / dessert / drink, §2c), category (what it's made of,
   nullable, §2d), source, stated servings, tags/favorite flag, ingredient lines,
   and an optional photo (bytes + MIME type, plus the URL it came from).
 - **Ingredient line** — name, quantity, unit (belongs to a Recipe).

@@ -133,12 +133,18 @@ table {
   border-collapse: collapse;
 }
 
-/* --- Recipe sections: dinners / drinks (§2c) -------------------------------- */
+/* --- Recipe sections: dinners / sides / desserts / drinks (§2c) ------------- */
 
-/* An underlined tab strip rather than pill buttons: the sections are two views
-   of one list, and the list starts immediately below them. */
+/* An underlined tab strip rather than pill buttons: the sections are views of
+   one list, and the list starts immediately below them.
+
+   Wrapping rather than scrolling sideways, now that there are four of them and
+   they no longer fit a phone: a tab that has scrolled off the edge is a section
+   nobody knows exists, and this strip is the only route to three of them. A
+   second row is ugly for one week and then you know where the desserts are. */
 .recipe-kind-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
   border-bottom: 1px solid var(--border);
   margin: 0.5rem 0 1rem;
@@ -148,7 +154,7 @@ table {
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
-  padding: 0.5rem 0.9rem;
+  padding: 0.5rem 0.7rem;
   font-size: 1rem;
   cursor: pointer;
   color: inherit;
@@ -650,6 +656,21 @@ table {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
+/* What it is, when it isn't a dinner (§2c). A quiet outlined tag rather than a
+   coloured badge: it is a qualifier on the name it follows, not a second thing
+   to read, and the row's job is still to be scanned for the name. */
+.picker-option-kind {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  font-size: 0.75em;
+  font-weight: 400;
+  vertical-align: 0.05em;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
 /* Why the recipe turned up: the ingredients the query actually matched. */
 .picker-why {
   font-size: 0.85em;

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { formatDurationMinutes } from "@/lib/durations";
 import { recipeImageSrc } from "@/lib/recipeImage";
-import { isPlannable, type RecipeKind } from "@/lib/recipeKind";
+import { isSuggestable, type RecipeKind } from "@/lib/recipeKind";
 import {
   CATEGORY_FILTERS,
   categoryFilterLabel,
@@ -164,9 +164,12 @@ export function RecipeSuggestions() {
 
   /** Why the card is empty — a different sentence, and a different fix, each. */
   function emptyLine(): string {
-    const dinners = (recipes ?? []).filter((r) => isPlannable(r.kind));
+    // Dinners, not everything plannable: a library holding nothing but salads
+    // has nothing to suggest, and saying so is more use than "every dinner
+    // that fits is already on the plan" about a set that is empty (§2c).
+    const dinners = (recipes ?? []).filter((r) => isSuggestable(r.kind));
     if (dinners.length === 0) {
-      return "Nothing to suggest yet — the library is empty.";
+      return "Nothing to suggest yet — no dinners in the library.";
     }
     // What we'd have had to offer if the week weren't in the way. It tells
     // "nothing is marked fish" apart from "we've planned it all already",
