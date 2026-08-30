@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
+import { RECIPE_KINDS } from "@/lib/recipeKind";
 
 // Rename, favorite, and delete for a single recipe (§2).
 
@@ -24,6 +25,9 @@ export async function GET(
 
 const PatchInput = z.object({
   name: z.string().min(1).optional(),
+  // Moving a recipe between the library's two sections (§2c) is an ordinary
+  // edit — a coffee filed as dinner is a typo, not a reason to retype it.
+  kind: z.enum(RECIPE_KINDS).optional(),
   source: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   statedServings: z.number().int().positive().optional(),

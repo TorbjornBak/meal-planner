@@ -82,6 +82,25 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   pasted URL nor a page-declared image URL can be used to probe the host's own
   network. The bookmarklet path still sends content straight from your browser.
 
+## 2c. Drinks — a second section in the library
+
+- The library holds **dinners and drinks**, in two sections you switch between:
+  coffee ratios, cordials, gløgg, the punch somebody makes at Christmas.
+- **A drink is a recipe in every way that matters.** Same paste-and-parse (§1),
+  same mandatory review, same ingredients, same method with working timers, same
+  photo. It differs in one respect only: it isn't dinner.
+- **The plan stays dinners only** (§3), so a drink never appears in the night
+  picker and never goes on a night. Everything downstream follows from that:
+  a drink has no "last cooked" week, and its ingredients don't reach the
+  aggregated shopping list (§5) — coffee beans go on the list by hand, like
+  kitchen roll.
+- **Which it is, is a field, not a tag.** Tags are free text the household types,
+  so "drink", "Drink" and "drinks" would all mean this and none of them could be
+  relied on by the picker, which has to be *certain* before offering something as
+  tonight's dinner. It's set in the review step and changed on the edit page like
+  any other parsed field.
+- **The wording follows the kind.** A stew serves four; a cortado makes one.
+
 ## 4. Scaling — one household-size setting
 
 - A single "household size" setting scales every recipe from its stated servings to
@@ -164,12 +183,31 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## 9b. Weekly newsletter
 
-- **One email a week** to each member who wants it: the **coming week's dinners**,
-  night by night, and the **recipes added to the library** in the last seven days.
-- It's a **nudge, not a report** — the empty nights are stated rather than
-  omitted, and the call to action counts them ("Fill in the 4 empty nights").
+- **One email a week** to each member who wants it, looking both ways:
+  - **Ahead** — the **coming week's dinners**, night by night, and the **recipes
+    added to the library** in the last seven days.
+  - **Behind** — **what got cooked** in the week now ending, and **what the
+    shopping came to**, against the four weeks before it.
+- The forward half is a **nudge, not a report** — the empty nights are stated
+  rather than omitted, and the call to action counts them ("Fill in the 4 empty
+  nights"). It leads, because it's the half somebody has to act on tonight.
+- The backward half **is** a report, and sits below a rule. The plan and the
+  ledger (§7, §8) always knew what the week held and cost; you just had to go and
+  look, and nobody opens a spending page on a Friday. Arriving unasked is the
+  only way that number gets seen.
+- **It reports the week you just lived through**, not the last complete one. The
+  mail goes out Friday evening, so the two nights still to come are counted as
+  they fall rather than held back a week — by which time nobody remembers the
+  week anyway.
+- **The comparison is only drawn when there's something to compare with.** Four
+  weeks of ledger, of which at least two contain a shop; anything younger would
+  be arithmetic about the install date. A week with no shop logged says so — that
+  nudge is worth having — but a household that has never used the ledger is never
+  told about the ledger.
 - **A week with nothing on it isn't sent.** A weekly email that regularly says
-  nothing is one people learn to ignore.
+  nothing is one people learn to ignore. Last week's cooking and spending count
+  as something: a household that cooked five dinners and simply hasn't planned
+  next week yet is the one with the most to read.
 - **Sent over your own SMTP server**, not a mail API — no account to sign up
   for, no key to leak (§12).
 - **The app schedules it**, on a timer started from Next's `instrumentation`
@@ -218,8 +256,9 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## Data model sketch
 
-- **Recipe** — name, source, stated servings, tags/favorite flag, ingredient lines,
-  and an optional photo (bytes + MIME type, plus the URL it came from).
+- **Recipe** — name, kind (dinner or drink, §2c), source, stated servings,
+  tags/favorite flag, ingredient lines, and an optional photo (bytes + MIME type,
+  plus the URL it came from).
 - **Ingredient line** — name, quantity, unit (belongs to a Recipe).
 - **WeekPlan** — week identifier + its dinner slots. Each slot pins a Recipe to a night
   (with an optional per-slot servings override and an ordering position); a night may

@@ -2,6 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  DEFAULT_RECIPE_KIND,
+  RECIPE_KINDS,
+  kindLabel,
+  yieldNoun,
+  type RecipeKind,
+} from "@/lib/recipeKind";
 
 interface ParsedIngredient {
   name: string;
@@ -10,6 +17,13 @@ interface ParsedIngredient {
 }
 interface ParsedRecipe {
   name: string;
+  /**
+   * Dinner or drink (§2c). The parser never says — nothing in a recipe page's
+   * markup distinguishes a cortado from a casserole — so it is a choice made
+   * here, in the review step that already exists for everything the parser
+   * can't be trusted on.
+   */
+  kind: RecipeKind;
   source: string | null;
   instructions: string | null;
   statedServings: number;
@@ -64,7 +78,9 @@ export default function NewRecipePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      setDraft(await res.json());
+      // The parser returns no kind, and defaulting it here rather than
+      // server-side keeps /api/parse about reading text.
+      setDraft({ kind: DEFAULT_RECIPE_KIND, ...(await res.json()) });
     } finally {
       setBusy(false);
     }
@@ -157,7 +173,23 @@ export default function NewRecipePage() {
           </label>
           <br />
           <label>
-            Serves{" "}
+            This is a{" "}
+            <select
+              value={draft.kind}
+              onChange={(e) =>
+                setDraft({ ...draft, kind: e.target.value as RecipeKind })
+              }
+            >
+              {RECIPE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {kindLabel(k).toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <br />
+          <label>
+            {yieldNoun(draft.kind)}{" "}
             <input
               type="number"
               value={draft.statedServings}

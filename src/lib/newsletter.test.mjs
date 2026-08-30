@@ -21,9 +21,24 @@ const WEEK = new Date(Date.UTC(2026, 7, 24));
 const LINKS = {
   plan: "https://box.ts.net/plan?weekStart=2026-08-24",
   shopping: "https://box.ts.net/shopping",
+  spending: "https://box.ts.net/spending",
   unsubscribe: "https://box.ts.net/api/newsletter/unsubscribe?u=abc&t=def",
   recipe: (id) => `https://box.ts.net/recipes/${id}`,
 };
+
+/**
+ * A look-back at the week before WEEK — Mon 17 Aug 2026 — with nothing in it
+ * unless the test says otherwise.
+ */
+function lookBack(overrides = {}) {
+  return {
+    weekStart: new Date(Date.UTC(2026, 7, 17)),
+    cooked: [],
+    nightsCooked: 0,
+    spend: { total: 0, trips: 0, average: null },
+    ...overrides,
+  };
+}
 
 /** Seven empty nights, with the given days filled in (and optionally decided). */
 function nights(filled = {}, notes = {}) {
@@ -268,4 +283,210 @@ test("a week of nothing but decisions is still worth sending", () => {
   assert.equal(isWorthSending(input({ nights: nights({}, notes) })), true);
   // A week nobody has touched still says nothing, and still isn't sent.
   assert.equal(isWorthSending(input()), false);
+});
+
+// ---------------------------------------------------------------------------
+// The week just gone (§7, §8, §9b)
+//
+// The half of the mail that reports rather than nudges: what got cooked, and
+// what the shopping came to. All of it is arithmetic the app already had and
+// never said out loud, so the cases worth pinning are the ones where saying it
+// would be wrong — a ledger too young to average, a week nobody shopped, a dish
+// cooked twice.
+// ---------------------------------------------------------------------------
+
+test("the week just gone is headed with its own range, not the coming week's", () => {
+  const { text, html } = renderNewsletter(
+    input({
+      lookBack: lookBack({
+        cooked: [{ id: "r1", name: "Lasagne", times: 1 }],
+        nightsCooked: 1,
+      }),
+    }),
+  );
+  assert.match(text, /The week just gone, 17–23 Aug/);
+  assert.match(html, /The week just gone/);
+  assert.ok(html.includes("17–23 Aug"));
+  // The coming week still leads the mail.
+  assert.match(text, /Here's what's for dinner, 24–30 Aug/);
+});
+
+test("what was cooked is listed, and links through in the HTML", () => {
+  const { text, html } = renderNewsletter(
+    input({
+      lookBack: lookBack({
+        cooked: [
+          { id: "r1", name: "Lasagne", times: 1 },
+          { id: "r2", name: "Dal", times: 1 },
+        ],
+        nightsCooked: 2,
+      }),
+    }),
+  );
+  assert.match(text, /Cooked on 2 nights: Lasagne, Dal\./);
+  assert.ok(html.includes("https://box.ts.net/recipes/r1"));
+  assert.ok(html.includes("https://box.ts.net/recipes/r2"));
+});
+
+test("a dish cooked twice says so once instead of appearing twice", () => {
+  const { text } = renderNewsletter(
+    input({
+      lookBack: lookBack({
+        cooked: [{ id: "r1", name: "Chili", times: 2 }],
+        nightsCooked: 2,
+      }),
+    }),
+  );
+  assert.match(text, /Cooked on 2 nights: Chili \(twice\)/);
+  assert.equal(text.match(/Chili/g).length, 1);
+});
+
+test("three nights of the same dish counts rather than saying twice", () => {
+  const { text } = renderNewsletter(
+    input({
+      lookBack: lookBack({
+        cooked: [{ id: "r1", name: "Grød", times: 3 }],
+        nightsCooked: 3,
+      }),
+    }),
+  );
+  assert.match(text, /Grød \(3 times\)/);
+});
+
+test("one cooked night is singular", () => {
+  const { text } = renderNewsletter(
+    input({
+      lookBack: lookBack({
+        cooked: [{ id: "r1", name: "Dal", times: 1 }],
+        nightsCooked: 1,
+      }),
+    }),
+  );
+  assert.match(text, /Cooked on 1 night: Dal/);
+});
+
+test("the week's spend is stated with the number of shops it took", () => {
+  const { text, html } = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 1247.5, trips: 2, average: null } }) }),
+  );
+  assert.match(text, /Spent 1247\.50 kr over 2 shops\./);
+  assert.match(html, /Spent 1247\.50 kr over 2 shops\./);
+  // And a way to go and check it.
+  assert.ok(html.includes(LINKS.spending));
+  assert.ok(text.includes(LINKS.spending));
+});
+
+test("one shop is singular", () => {
+  const { text } = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 400, trips: 1, average: null } }) }),
+  );
+  assert.match(text, /over 1 shop\./);
+});
+
+test("spend is compared with the four weeks behind it, in both directions", () => {
+  const over = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 1200, trips: 2, average: 1000 } }) }),
+  );
+  assert.match(over.text, /200\.00 kr above your 4-week average/);
+
+  const under = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 900, trips: 2, average: 1000 } }) }),
+  );
+  assert.match(under.text, /100\.00 kr below your 4-week average/);
+});
+
+test("a difference of small change reads as an ordinary week", () => {
+  const { text } = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 1000.4, trips: 2, average: 1000 } }) }),
+  );
+  assert.match(text, /Spent 1000\.40 kr over 2 shops — about your usual week\./);
+  // The point of the threshold: the *difference* isn't quoted back. No
+  // "0.40 kr above your 4-week average" precision theatre.
+  assert.ok(!text.includes("above"));
+  assert.ok(!text.includes("below"));
+});
+
+test("no average means no comparison rather than a comparison with zero", () => {
+  const { text } = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 800, trips: 1, average: null } }) }),
+  );
+  assert.match(text, /Spent 800\.00 kr over 1 shop\./);
+  assert.ok(!text.includes("average"));
+});
+
+test("a week with an average but no shops says nothing was logged", () => {
+  const { text } = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 0, trips: 0, average: 900 } }) }),
+  );
+  assert.match(text, /No shopping logged this week/);
+  assert.ok(!text.includes("0.00 kr"));
+});
+
+test("a household that has never used the ledger is never told about it", () => {
+  const { text, html } = renderNewsletter(
+    input({
+      lookBack: lookBack({
+        cooked: [{ id: "r1", name: "Dal", times: 1 }],
+        nightsCooked: 1,
+        spend: { total: 0, trips: 0, average: null },
+      }),
+    }),
+  );
+  // The cooking half still reports; the money half stays quiet entirely.
+  assert.match(text, /Cooked on 1 night: Dal\./);
+  assert.ok(!text.includes("shopping logged"));
+  assert.ok(!html.includes("Ledger"));
+});
+
+test("a week that was paid for but not cooked says both things", () => {
+  const { text } = renderNewsletter(
+    input({ lookBack: lookBack({ spend: { total: 500, trips: 1, average: null } }) }),
+  );
+  assert.match(text, /Nothing was cooked off the plan\./);
+  assert.match(text, /Spent 500\.00 kr/);
+});
+
+test("an empty week behind adds nothing to the mail at all", () => {
+  const { text, html } = renderNewsletter(
+    input({ nights: nights({ 0: [{ name: "Dal" }] }), lookBack: lookBack() }),
+  );
+  assert.ok(!text.includes("The week just gone"));
+  assert.ok(!html.includes("The week just gone"));
+  // And no spending link appears out of nowhere in the footer block.
+  assert.ok(!text.includes(LINKS.spending));
+});
+
+test("a cooked dish's name is escaped in the HTML and left alone in the text", () => {
+  const { html, text } = renderNewsletter(
+    input({
+      lookBack: lookBack({
+        cooked: [{ id: "r1", name: "Steak & <ale> pie", times: 1 }],
+        nightsCooked: 1,
+      }),
+    }),
+  );
+  assert.match(html, /Steak &amp; &lt;ale&gt; pie/);
+  assert.ok(!html.includes("<ale>"), "raw angle brackets must not reach the HTML");
+  assert.match(text, /Steak & <ale> pie/);
+});
+
+test("last week's cooking alone is worth sending, even with nothing planned", () => {
+  // The case the old rule got wrong: a household that cooked and shopped, and
+  // simply hasn't filled in next week yet, has the most to read and the most
+  // to do — and used to hear nothing.
+  assert.equal(
+    isWorthSending(
+      input({ lookBack: lookBack({ cooked: [{ id: "r1", name: "Dal", times: 1 }], nightsCooked: 1 }) }),
+    ),
+    true,
+  );
+  assert.equal(
+    isWorthSending(input({ lookBack: lookBack({ spend: { total: 700, trips: 1, average: null } }) })),
+    true,
+  );
+});
+
+test("an empty week behind doesn't make an empty week ahead worth sending", () => {
+  assert.equal(isWorthSending(input({ lookBack: lookBack() })), false);
+  assert.equal(isWorthSending(input({ lookBack: null })), false);
 });

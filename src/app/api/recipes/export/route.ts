@@ -38,6 +38,7 @@ export async function GET() {
     orderBy: { name: "asc" },
     select: {
       name: true,
+      kind: true,
       source: true,
       statedServings: true,
       instructions: true,

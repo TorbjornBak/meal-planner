@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
+import { RECIPE_KINDS } from "@/lib/recipeKind";
 
 // Recipe library CRUD (§2).
 
 const RecipeInput = z.object({
   name: z.string().min(1),
+  // Dinner or drink (§2c). Optional so every existing caller — the paste-text
+  // review step, the bookmarklet, the transfer import — keeps working and gets
+  // the column's own default.
+  kind: z.enum(RECIPE_KINDS).optional(),
   source: z.string().optional().nullable(),
   instructions: z.string().optional().nullable(),
   statedServings: z.number().int().positive(),
@@ -91,12 +96,13 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { name, source, instructions, statedServings, tags, ingredients } =
+  const { name, kind, source, instructions, statedServings, tags, ingredients } =
     parsed.data;
 
   const recipe = await prisma.recipe.create({
     data: {
       name,
+      ...(kind ? { kind } : {}),
       source: source ?? null,
       instructions: instructions ?? null,
       statedServings,

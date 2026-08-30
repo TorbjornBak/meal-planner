@@ -27,6 +27,7 @@ import {
 function row(over = {}) {
   return {
     name: "Lasagne",
+    kind: "DINNER",
     source: "https://example.test/lasagne",
     statedServings: 4,
     instructions: "Brown the mince. Bake 40 minutes.",
@@ -303,4 +304,35 @@ test("a file carrying the same recipe twice only imports it once", () => {
     ["Lasagne", "Frikadeller"],
   );
   assert.equal(skipped.length, 1);
+});
+
+// --- Dinner or drink (§2c) ---------------------------------------------------
+
+test("a drink crosses the wire as a drink", () => {
+  const file = throughTheWire([row({ name: "Cortado", kind: "DRINK", statedServings: 1 })]);
+  assert.equal(file.recipes[0].kind, "DRINK");
+
+  const parsed = parseTransferFile(file);
+  assert.equal(parsed.ok, true);
+  assert.equal(toRecipeCreateData(parsed.file.recipes[0]).kind, "DRINK");
+});
+
+test("a file written before drinks existed imports as dinners", () => {
+  // Exactly what an older instance produced: no `kind` key anywhere.
+  const file = throughTheWire([row()]);
+  delete file.recipes[0].kind;
+
+  const parsed = parseTransferFile(file);
+  assert.equal(parsed.ok, true);
+  assert.equal(toRecipeCreateData(parsed.file.recipes[0]).kind, "DINNER");
+});
+
+test("a kind this version has never heard of is refused by name, not silently taken", () => {
+  const file = throughTheWire([row()]);
+  file.recipes[0].kind = "BAKING";
+
+  const parsed = parseTransferFile(file);
+  assert.equal(parsed.ok, false);
+  assert.match(parsed.message, /Lasagne/);
+  assert.match(parsed.message, /kind/);
 });
