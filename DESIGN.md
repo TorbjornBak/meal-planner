@@ -101,6 +101,66 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   any other parsed field.
 - **The wording follows the kind.** A stew serves four; a cortado makes one.
 
+## 2d. Categories — what a recipe is made of
+
+- Every recipe can say what it is: **meat, fish, vegetarian or vegan**. One
+  axis — what's at the centre of the plate — and one value per recipe, because
+  that is the shape of the question: "we had fish on Monday" rules out a night,
+  it doesn't rule out an ingredient.
+- **Meat covers poultry and fish covers shellfish.** A household planning a week
+  thinks "meat, fish, or neither", and splitting the chicken out would make the
+  commonest category two decisions instead of one. The boundaries are in each
+  filter's tooltip rather than in four more categories.
+- **Vegan counts as vegetarian, and not the other way round.** Someone filtering
+  for vegetarian is naming what they won't eat, so hiding the dal because it
+  clears a higher bar is the kind of wrong that stops people trusting a filter.
+  The implication runs one way only: asking for vegan and being handed an
+  omelette is the failure the field exists to prevent.
+- **Which it is, is a field, not a tag** — the same reasoning as §2c, and more
+  of it. Tags are free text, so "veggie", "Vegetarian" and "vegetar" would all
+  mean this and none could be relied on. The dashboard offers a recipe *as*
+  vegetarian (§2e); a filter answering that from free text will eventually put a
+  ragù in front of someone who asked for none.
+- **Nothing was backfilled, and nothing is guessed.** Every recipe that predates
+  the field reads "not said", and stays that way until somebody sets it. There
+  is no honest way to infer it: reading the ingredient lines finds "kylling"
+  inside "kyllingebouillon" and files a soup as meat, or misses the fish sauce
+  and calls a curry vegan. An invented dietary claim is worse than an absent
+  one. (This is also §12 — no LLM, and no heuristic pretending to be one.)
+- **Set in the review step, changed on the edit page**, like any other parsed
+  field. The library filters on it, and its **"Not said"** filter is how the
+  backlog of unfiled recipes gets found and worked through — a filter nobody can
+  see is one nobody fixes.
+
+## 2e. "What shall we have?" — random dinners on the dashboard
+
+- The dashboard offers **three dinners from the library, at random**, with a
+  **shuffle** button and the category filters from §2d.
+- **It answers the question that comes before a search.** The library can
+  already find a cod recipe (§2); this is for the late afternoon when nothing is
+  decided, which is the harder half and the reason the same eight dinners come
+  round for years. The staleness sort (§2) attacks it from the other side, but
+  that is a question you have to think to ask — this one is just there.
+- **Random, not ranked.** A recommender would have to decide what makes a dinner
+  good tonight, which this app cannot know and would need an LLM to fake (§12).
+  Three at random out of a shelf you chose every item of is a good enough
+  answer, and — unlike a score derived from your own cooking history — one you
+  can explain.
+- **Dinners only, and nothing already on the week.** The card's one action is to
+  put it on a night, and the plan is dinners only (§3), so a drink is never
+  offered. Neither is a recipe already booked for this week: it's the one thing
+  on the shelf that definitely isn't an answer to "what else?", and taking the
+  offer would put it on the week twice.
+- **The shuffle avoids what's on screen.** Drawing uniformly every press means a
+  small library hands you two of the same three back, and a button that looks
+  like it didn't work is worse than no button. When there aren't enough unseen
+  dinners to fill the card it tops up from the rest rather than coming back
+  short.
+- **One press to plan it.** Each suggestion carries "Add to <night>" for the
+  first free night of the week, and says which. The card doesn't rearrange
+  itself when you take one — a suggestion that vanishes as you accept it leaves
+  you wondering whether it landed.
+
 ## 4. Scaling — one household-size setting
 
 - A single "household size" setting scales every recipe from its stated servings to
@@ -256,9 +316,9 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 ## Data model sketch
 
-- **Recipe** — name, kind (dinner or drink, §2c), source, stated servings,
-  tags/favorite flag, ingredient lines, and an optional photo (bytes + MIME type,
-  plus the URL it came from).
+- **Recipe** — name, kind (dinner or drink, §2c), category (what it's made of,
+  nullable, §2d), source, stated servings, tags/favorite flag, ingredient lines,
+  and an optional photo (bytes + MIME type, plus the URL it came from).
 - **Ingredient line** — name, quantity, unit (belongs to a Recipe).
 - **WeekPlan** — week identifier + its dinner slots. Each slot pins a Recipe to a night
   (with an optional per-slot servings override and an ordering position); a night may

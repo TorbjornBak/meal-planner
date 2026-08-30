@@ -34,6 +34,28 @@ enum RecipeKind {
   DRINK
 }
 
+/// What a recipe is *made of*, at the level a household decides on (§2d).
+///
+/// One axis — what sits at the centre of the plate — and one value per recipe,
+/// because that is the shape of the question being asked. "We had fish on
+/// Monday" rules out a night; it does not rule out an ingredient.
+///
+/// An enum for the reason `RecipeKind` is one, only more so: the dashboard's
+/// suggestions (§2e) offer a recipe *as* vegetarian, and a filter reading free
+/// text will eventually put a ragù in front of someone who asked for none.
+///
+/// MEAT covers poultry — a household planning a week thinks "meat or fish or
+/// neither", and splitting the chicken out would make the commonest category
+/// two clicks. FISH covers shellfish, for the same reason. Adding a value is a
+/// value here, a value in `RECIPE_CATEGORIES`, and a migration; the words the
+/// UI needs all hang off that list (src/lib/recipeCategory.ts).
+enum RecipeCategory {
+  MEAT
+  FISH
+  VEGETARIAN
+  VEGAN
+}
+
 /// Everything pasted-and-parsed is saved here and accumulates into the library.
 model Recipe {
   id                  String           @id @default(cuid())
@@ -41,6 +63,15 @@ model Recipe {
   /// Dinner or drink (§2c). Defaults to DINNER so every recipe that existed
   /// before drinks did stays exactly where its household left it.
   kind                RecipeKind       @default(DINNER)
+  /// What it's made of (§2d) — the filter behind "what shall we have?".
+  ///
+  /// Nullable on purpose, and nothing was backfilled. Every recipe that
+  /// predates the question has no honest answer to it: reading the ingredient
+  /// lines would find "kylling" inside "kyllingebouillon" and file a soup as
+  /// meat, or miss the fish sauce and call a curry vegan. An invented dietary
+  /// claim is worse than an absent one, so null means "nobody has said" and is
+  /// shown that way — never as "vegetarian" by omission.
+  category            RecipeCategory?
   /// Where it came from (URL or free text). Optional — pasted plans may lack one.
   source              String?
   /// The method/steps text, captured at parse time for the cooking view (§2).
@@ -80,6 +111,7 @@ model Recipe {
 
   @@index([isFavorite])
   @@index([kind])
+  @@index([category])
 }
 
 /// One "name / quantity / unit" line belonging to a recipe. Corrected by the

@@ -34,6 +34,8 @@ src/lib/                  Core logic:
   image.ts                  download a recipe photo, private-network guarded (§2b)
   durations.ts              cook times out of a step, for the timers (§2)
   recipeKind.ts             dinner or drink: the library's two sections (§2c)
+  recipeCategory.ts         meat / fish / vegetarian / vegan (§2d)
+  recipeSuggestions.ts      the dashboard's random dinners (§2e)
   scaling.ts                recipe scaling to household size (§4)
   shopping.ts               merge + pantry aggregation (§5)
   keys.ts                   ingredient-name normalization for merge/diff/pantry

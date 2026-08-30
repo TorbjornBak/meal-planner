@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 import { RECIPE_KINDS } from "@/lib/recipeKind";
+import { RECIPE_CATEGORIES } from "@/lib/recipeCategory";
 
 // Rename, favorite, and delete for a single recipe (§2).
 
@@ -28,6 +29,10 @@ const PatchInput = z.object({
   // Moving a recipe between the library's two sections (§2c) is an ordinary
   // edit — a coffee filed as dinner is a typo, not a reason to retype it.
   kind: z.enum(RECIPE_KINDS).optional(),
+  // What it's made of (§2d). Nullable so a category can be *taken back* and
+  // not merely changed — mislabelling a dish vegetarian is the one mistake
+  // here worth being able to undo to silence rather than to another claim.
+  category: z.enum(RECIPE_CATEGORIES).nullable().optional(),
   source: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   statedServings: z.number().int().positive().optional(),

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { weeklyBuckets } from "@/lib/spending";
 import { WeeklySpendChart } from "@/components/WeeklySpendChart";
+import { RecipeSuggestions } from "@/components/RecipeSuggestions";
 
 // Reads live data behind the shared-session gate — never statically rendered.
 export const dynamic = "force-dynamic";
@@ -42,6 +43,11 @@ export default async function DashboardPage() {
           <strong style={{ fontSize: "2em" }}>{money(monthTotal)}</strong>
         </div>
       </div>
+
+      {/* Above the spending, deliberately. This is the screen you open in the
+          late afternoon with nothing decided (§2e); what the month has cost is
+          a thing you look up, not a thing you are asked. */}
+      <RecipeSuggestions />
 
       <div className="card">
         <h2>Weekly spend</h2>

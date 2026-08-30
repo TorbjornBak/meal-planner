@@ -12,6 +12,13 @@ import {
   yieldNoun,
   type RecipeKind,
 } from "@/lib/recipeKind";
+import {
+  RECIPE_CATEGORIES,
+  UNCATEGORISED_LABEL,
+  categoryHint,
+  categoryLabel,
+  type RecipeCategory,
+} from "@/lib/recipeCategory";
 
 // Full recipe editor (§2). Edit name, source, servings, ingredients (add/remove
 // rows), the method, and the photo. Backed by PATCH /api/recipes/[id] and
@@ -37,6 +44,12 @@ interface RecipeForm {
   name: string;
   /** Which section of the library it lives in (§2c) — dinner or drink. */
   kind: RecipeKind;
+  /**
+   * What it's made of (§2d), or null when nobody has said. This page is where
+   * the library's uncategorised backlog gets worked through — the library's
+   * "Not said" filter is the list, and this select is the fix.
+   */
+  category: RecipeCategory | null;
   source: string | null;
   instructions: string | null;
   statedServings: number;
@@ -79,6 +92,10 @@ export default function EditRecipePage({
           // if this instance is talking to an older API; the column itself
           // defaults, so this is belt and braces.
           kind: r.kind ?? DEFAULT_RECIPE_KIND,
+          // `?? null` rather than left undefined: undefined would be dropped
+          // by JSON.stringify on save, so clearing a wrong category would
+          // silently do nothing.
+          category: r.category ?? null,
           source: r.source,
           instructions: r.instructions,
           statedServings: r.statedServings,
@@ -236,6 +253,29 @@ export default function EditRecipePage({
               {RECIPE_KINDS.map((k) => (
                 <option key={k} value={k}>
                   {kindLabel(k)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {/* Blank-able on purpose. Mislabelling a dish vegetarian is the
+                mistake here worth being able to undo to silence rather than
+                only to another claim (§2d). */}
+            Made of{" "}
+            <select
+              value={form.category ?? ""}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  category: (e.target.value || null) as RecipeCategory | null,
+                })
+              }
+              title={form.category ? categoryHint(form.category) : undefined}
+            >
+              <option value="">{UNCATEGORISED_LABEL}</option>
+              {RECIPE_CATEGORIES.map((c) => (
+                <option key={c} value={c} title={categoryHint(c)}>
+                  {categoryLabel(c)}
                 </option>
               ))}
             </select>

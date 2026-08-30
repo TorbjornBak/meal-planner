@@ -28,6 +28,7 @@ function row(over = {}) {
   return {
     name: "Lasagne",
     kind: "DINNER",
+    category: "MEAT",
     source: "https://example.test/lasagne",
     statedServings: 4,
     instructions: "Brown the mince. Bake 40 minutes.",
@@ -86,6 +87,7 @@ test("a recipe survives export and re-import unchanged", () => {
   assert.equal(data.statedServings, 4);
   assert.equal(data.instructions, "Brown the mince. Bake 40 minutes.");
   assert.deepEqual(data.tags, ["pasta", "weekend"]);
+  assert.equal(data.category, "MEAT");
   assert.equal(data.totalTimeMinutes, 90);
   assert.deepEqual(data.ingredients.create, [
     { name: "Minced beef", quantity: 500, unit: "g", position: 0 },
@@ -335,4 +337,45 @@ test("a kind this version has never heard of is refused by name, not silently ta
   assert.equal(parsed.ok, false);
   assert.match(parsed.message, /Lasagne/);
   assert.match(parsed.message, /kind/);
+});
+
+// --- What it's made of (§2d) -------------------------------------------------
+
+test("a category crosses the wire intact", () => {
+  const file = throughTheWire([row({ name: "Dal", category: "VEGAN" })]);
+  assert.equal(file.recipes[0].category, "VEGAN");
+
+  const parsed = parseTransferFile(file);
+  assert.equal(parsed.ok, true);
+  assert.equal(toRecipeCreateData(parsed.file.recipes[0]).category, "VEGAN");
+});
+
+test("a file written before categories existed imports as uncategorised", () => {
+  // Exactly what an older instance produced: no `category` key anywhere. The
+  // receiving library must say "not said" rather than pick one — an invented
+  // dietary claim is worse than an absent one (§2d).
+  const file = throughTheWire([row()]);
+  delete file.recipes[0].category;
+
+  const parsed = parseTransferFile(file);
+  assert.equal(parsed.ok, true);
+  assert.equal(toRecipeCreateData(parsed.file.recipes[0]).category, null);
+});
+
+test("a recipe nobody categorised stays uncategorised through the round trip", () => {
+  const parsed = parseTransferFile(throughTheWire([row({ category: null })]));
+  assert.equal(parsed.ok, true);
+  assert.equal(toRecipeCreateData(parsed.file.recipes[0]).category, null);
+});
+
+test("a category this version has never heard of is refused, not dropped", () => {
+  // The tempting alternative — default the unknown value to null — would throw
+  // away the one claim the field exists to carry, and do it silently.
+  const file = throughTheWire([row()]);
+  file.recipes[0].category = "PESCATARIAN";
+
+  const parsed = parseTransferFile(file);
+  assert.equal(parsed.ok, false);
+  assert.match(parsed.message, /Lasagne/);
+  assert.match(parsed.message, /category/);
 });
