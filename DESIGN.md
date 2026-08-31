@@ -357,6 +357,57 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   header the mail client's own button uses. Unsubscribing only clears the digest
   opt-in; the account is untouched.
 
+## 9c. Platform administration — operating the box, not reading the kitchens
+
+- **Two jobs, two roles, no overlap.** A household admin runs one kitchen. A
+  **platform admin** runs the installation: the SMTP relay, the backup
+  repository, and the invitations that let a new household exist at all.
+  Neither implies the other, and the platform admin's powers stop dead at the
+  door of any household they are not a member of.
+- **Operational endpoints are gated on the platform role, not on having a
+  login.** SMTP diagnostics and every backup route used to accept any signed-in
+  account. On a one-household box that was nearly true; with two households it
+  means somebody from another kitchen can read the state of a backup
+  repository and the real text of an SMTP error. Hiding the buttons is not the
+  fix — the check is in the route (`guardOperational`), and the settings screen
+  merely stops drawing controls that would now be refused.
+- **`CRON_SECRET` is a door for one operation, not a role.** A host script may
+  present it to run a backup. It does not open the admin screens: a shared
+  secret drives a known job, it does not get to browse households.
+- **The intervention view is deliberately narrow.** A platform admin can see,
+  for any household: its name, when it was created, who is a member, their
+  role, when they joined and when they last signed in. That is all. No recipe,
+  no plan, no shopping list, no receipt, no total. The two things they may
+  *do* are change somebody's household role and remove somebody from a
+  household.
+- **It exists because the peer-admin rule is right but incomplete.** Household
+  admins are equals and cannot demote or remove one another (§9), which stops
+  two people racing each other out of a shared kitchen — but it leaves a
+  deadlocked household, or one whose only admin has lost their mailbox, unable
+  to fix itself. Somebody outside has to be able to act. A household with
+  members but no admin is flagged on the screen, since that is the state the
+  whole view is for.
+- **A platform admin may not demote a household's last admin** — that would
+  manufacture the very stranded household this repairs. They *may* remove the
+  last member, because that is how a household is wound up, and refusing it
+  would strand abandoned households on the box for ever.
+- **Every intervention is written down.** `AuditEvent` records who did what, to
+  which household, to whom, as a sentence composed where the facts were still
+  in scope. Each row stores the actor's address, the household's name and the
+  subject's address as **snapshots** beside the foreign keys, and the keys null
+  out rather than cascade: an audit trail that empties itself when an account
+  is deleted is not an audit trail, and the moment anybody wants to read one is
+  precisely the moment somebody has been removed.
+- **The trail is readable by the people who write it**, which is weaker than
+  shipping it off the box and is the right amount here. The claim being made is
+  that an intervention cannot happen *silently*, not that it is unforgeable by
+  somebody holding the database password.
+- **Promotion to platform admin is not offered anywhere.** The first account
+  created at `/setup` is one; nothing in the interface makes another. The rule
+  that would govern it — no demoting yourself, no demoting a peer — is written
+  down in `platformRoleChangeRefusal` and tested, so the day a button appears
+  it starts out right, but no button exists today.
+
 ## 10. Hosting — home box via Tailscale (now)
 
 - Runs on a home box, reachable over a private Tailscale tailnet from anywhere
@@ -451,6 +502,10 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   an expiry and a spent-at marker (§9).
 - **NewsletterSend** — one digest, one member, one week; the unique constraint is
   what makes the weekly send idempotent (§9b).
+- **AuditEvent** — one thing a platform admin did: the action, the actor, the
+  household and person it touched, and a sentence saying what happened. Names
+  are snapshotted, not just referenced, so the record outlives what it names
+  (§9c).
 - **BackupRun** — one attempt at a nightly backup: the day it covers, whether it
   worked, the archive name and sizes, and the diagnosis if it didn't (§11).
 - **Settings** — household size, one row per household.

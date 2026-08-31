@@ -2,12 +2,13 @@
 
 ## Stopping point
 
-Phases 1–4 are complete:
+Phases 1–5 are complete:
 
 - [x] Add households, memberships, household/platform roles, and deterministic migration of existing data.
 - [x] Store an active household in each session and provide authorization helpers.
 - [x] Require household ownership throughout plans, recipes, pantry, shopping, spending, settings, capture, dashboard, and weekly-digest queries.
 - [x] Replace the account-shaped invitation with an invitation record, and add household administration.
+- [x] Separate operating the installation from living in a household, and write down every intervention.
 
 Keep the app behind **Tailscale Serve** for the friend trial. Do not enable Funnel or another public ingress until the remaining security phase is complete.
 
@@ -27,12 +28,14 @@ Carried into Phase 6: accounts invited under the old scheme still hold a members
 
 ## Phase 5 — platform administration
 
-- [ ] Add a platform-admin screen for inviting people to create households and revoking pending invitations.
-- [ ] Enforce platform-admin authorization in the API for SMTP diagnostics, backup status/setup/run, and other installation-wide settings; hiding UI controls is not sufficient.
-- [ ] Keep platform admin separate from household access. Platform admins receive no routine access to recipes, plans, shopping, pantry, or spending unless they are explicitly household members.
-- [ ] Add a narrow intervention view for household membership metadata and peer-admin recovery/removal. Record every intervention; do not provide routine household-content browsing.
-- [ ] If promotion to platform admin is added, prevent platform admins from demoting themselves or another platform admin through the normal interface.
-- [ ] Add authorization tests covering platform user, household admin, household member, and anonymous callers for every operational endpoint.
+- [x] Add a platform-admin screen for inviting people to create households and revoking pending invitations. — `/admin`, backed by `/api/admin/invitations`.
+- [x] Enforce platform-admin authorization in the API for SMTP diagnostics, backup status/setup/run, and other installation-wide settings; hiding UI controls is not sufficient. — `guardOperational` in every one; the settings screen stops drawing the controls too, but the check is in the route.
+- [x] Keep platform admin separate from household access. Platform admins receive no routine access to recipes, plans, shopping, pantry, or spending unless they are explicitly household members. — verified live: a platform admin can read another household's metadata and is refused 403 when selecting it.
+- [x] Add a narrow intervention view for household membership metadata and peer-admin recovery/removal. Record every intervention; do not provide routine household-content browsing. — `/api/admin/households` selects membership metadata only; both interventions write an `AuditEvent`.
+- [x] If promotion to platform admin is added, prevent platform admins from demoting themselves or another platform admin through the normal interface. — the condition did not trigger: no interface promotes anyone. The rule is written and tested as `platformRoleChangeRefusal` so the day a button appears it starts out right; nothing calls it yet.
+- [x] Add authorization tests covering platform user, household admin, household member, and anonymous callers for every operational endpoint. — `src/lib/platformAdmin.test.mjs` (matrix plus a structural test that every operational and `/api/admin` route calls the guard) and `src/lib/platformAudit.integration.test.mjs`.
+
+Verified live over HTTP against a scratch PostgreSQL, for every operational endpoint: anonymous 401, household member 403, household admin 403, platform admin 200. `CRON_SECRET` opens `POST /api/backup/run` and does not open the admin screens.
 
 ## Phase 6 — public-internet hardening
 

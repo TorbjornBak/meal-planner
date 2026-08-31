@@ -75,11 +75,16 @@ export async function POST(req: Request) {
     invitedById: context.user.id,
   });
 
+  // Shaped like a row of the GET list, so the card can render the new
+  // invitation without waiting for a reload. householdName is null because a
+  // household invitation joins one that already exists; only the platform kind
+  // proposes a name for one that doesn't.
   const pending = {
     id: invitation.id,
     email: invitation.email,
     invitedName: invitation.invitedName,
     kind: invitation.kind,
+    householdName: null,
     invitedBy: context.user.name ?? context.user.email,
     expiresAt: invitation.expiresAt,
     createdAt: invitation.createdAt,

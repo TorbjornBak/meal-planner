@@ -16,6 +16,7 @@ interface Account {
   household: { id: string; name: string; newsletterOptIn: boolean } | null;
   newsletterOptIn: boolean;
   mailConfigured: boolean;
+  isPlatformAdmin: boolean;
 }
 
 export function AccountCard() {
@@ -253,10 +254,15 @@ export function AccountCard() {
               {previewing ? "Sending…" : "Send me one now"}
             </button>{" "}
             {/* Connects and authenticates without sending, so a failure here
-                separates "can't reach the server" from "message refused". */}
-            <button className="muted" onClick={testMail} disabled={testing}>
-              {testing ? "Checking…" : "Test connection"}
-            </button>
+                separates "can't reach the server" from "message refused". This
+                is diagnosing the box's SMTP setup, not any one member's mail,
+                so it now belongs to /api/mail/test's platform-admin guard —
+                offering it to everyone else would just be a button that 403s. */}
+            {account.isPlatformAdmin && (
+              <button className="muted" onClick={testMail} disabled={testing}>
+                {testing ? "Checking…" : "Test connection"}
+              </button>
+            )}
           </p>
         ) : (
           <p className="muted" style={{ marginTop: 12, fontSize: "0.85em" }}>

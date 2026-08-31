@@ -361,6 +361,7 @@ model Household {
   name        String
   memberships HouseholdMembership[]
   invitations Invitation[]
+  auditEvents AuditEvent[]
   recipes     Recipe[]
   weekPlans   WeekPlan[]
   pantryItems PantryItem[]
@@ -415,6 +416,7 @@ model User {
   newsletters     NewsletterSend[]
   invitationsSent Invitation[]          @relation("InvitationsSent")
   invitationsUsed Invitation[]          @relation("InvitationsAccepted")
+  auditEvents     AuditEvent[]          @relation("AuditActor")
   lastLoginAt     DateTime?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
@@ -570,6 +572,70 @@ model NewsletterSend {
   @@unique([householdId, userId, weekStart])
   @@index([householdId])
   @@index([weekStart])
+}
+
+// -----------------------------------------------------------------------------
+// Audit trail (§9c)
+// -----------------------------------------------------------------------------
+
+/// What was done, by somebody operating the installation rather than cooking
+/// in it (§9c).
+///
+/// Deliberately narrow. This is not a log of everything that happens — it is
+/// the record of the acts that a household could not have performed for
+/// itself and might reasonably want to know about, plus the operational
+/// buttons that touch the whole box. Reading a plan is not here; reaching into
+/// a household's membership from outside is.
+enum AuditAction {
+  /// A platform admin offered somebody a household of their own.
+  PLATFORM_INVITATION_SENT
+  PLATFORM_INVITATION_REVOKED
+  /// A platform admin reached into a household's membership. The two acts the
+  /// intervention view permits, and the reason it exists: a household whose
+  /// admins have deadlocked, or which has lost its last one, cannot fix itself.
+  HOUSEHOLD_ROLE_CHANGED
+  HOUSEHOLD_MEMBER_REMOVED
+  /// Installation-wide operations: proving the relay works, and the backups.
+  SMTP_TEST_SENT
+  BACKUP_INITIALISED
+  BACKUP_RUN_REQUESTED
+}
+
+/// One thing a platform admin did, kept after the fact (§9c).
+///
+/// Every field that names somebody or something is stored twice: as a
+/// relation, which is convenient while the row it points at still exists, and
+/// as a plain snapshot of the text, which is what the record is actually made
+/// of. An audit trail that empties itself when an account is deleted or a
+/// household is wound up is not an audit trail — and the moment you most want
+/// to read one is exactly the moment somebody has been removed.
+///
+/// That is also why there is no update path and nothing here is nullable for
+/// convenience: rows are written once, by src/lib/audit.ts, and never edited.
+model AuditEvent {
+  id            String      @id @default(cuid())
+  action        AuditAction
+  /// The platform admin responsible. Null only for something the box did to
+  /// itself — a scheduled backup answering CRON_SECRET rather than a person.
+  actorId       String?
+  actor         User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /// Snapshot of who they were, which outlives the account.
+  actorEmail    String?
+  /// The household acted on, where there was one.
+  householdId   String?
+  household     Household?  @relation(fields: [householdId], references: [id], onDelete: SetNull)
+  householdName String?
+  /// The person acted on — invited, removed, promoted.
+  subjectEmail  String?
+  /// One sentence saying what happened, written at the point it happened,
+  /// where the surrounding context is still known. Reconstructing it later
+  /// from the enum and three ids produces something much vaguer.
+  detail        String
+  createdAt     DateTime    @default(now())
+
+  @@index([createdAt])
+  @@index([householdId])
+  @@index([actorId])
 }
 
 // -----------------------------------------------------------------------------

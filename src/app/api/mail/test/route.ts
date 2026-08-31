@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/currentUser";
+import { guardOperational } from "@/lib/opsGuard";
+import { recordAudit } from "@/lib/audit";
 import { isMailConfigured, verifyMailConnection } from "@/lib/mail";
 import { describeMailError } from "@/lib/mailError";
 
@@ -13,8 +14,11 @@ import { describeMailError } from "@/lib/mailError";
  * looking at this screen is the person who can go and fix the setting.
  */
 export async function POST() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // SMTP belongs to the installation, and the diagnosis it returns is the
+  // real one — hostnames, ports, what the relay said. That is worth showing to
+  // whoever can go and change the setting, and to nobody else.
+  const guard = await guardOperational();
+  if (!guard.ok) return guard.response;
 
   if (!isMailConfigured()) {
     const missing = [
@@ -43,6 +47,11 @@ export async function POST() {
 
   try {
     await verifyMailConnection();
+    await recordAudit({
+      action: "SMTP_TEST_SENT",
+      actor: guard.user ? { id: guard.user.id, email: guard.user.email } : null,
+      detail: `Checked the SMTP settings against ${settings.host}:${settings.port}; the relay accepted the connection.`,
+    });
     return NextResponse.json({
       ok: true,
       summary: `Connected to ${settings.host}:${settings.port} and authenticated.`,

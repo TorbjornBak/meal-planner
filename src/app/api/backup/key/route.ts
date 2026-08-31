@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/currentUser";
+import { guardOperational } from "@/lib/opsGuard";
 import { BorgCommandError, ensureSshKey } from "@/lib/borg";
 import { readBorgConfig } from "@/lib/borgConfig";
 import { describeBorgFailure } from "@/lib/borgError";
@@ -16,8 +16,8 @@ import { describeBorgFailure } from "@/lib/borgError";
  * settings screen into their storage box.
  */
 export async function POST() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const guard = await guardOperational();
+  if (!guard.ok) return guard.response;
 
   const { config } = readBorgConfig();
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/currentUser";
+import { guardOperational } from "@/lib/opsGuard";
 import { checkRepository } from "@/lib/backups";
 
 /**
@@ -15,8 +15,8 @@ import { checkRepository } from "@/lib/backups";
  * and the person reading this is the person who can go and fix the setting.
  */
 export async function POST() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const guard = await guardOperational();
+  if (!guard.ok) return guard.response;
 
   return NextResponse.json(await checkRepository());
 }
