@@ -239,16 +239,26 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - **Weekly-spend bar chart + rolling average.**
 - Budget targets deferred to a later version.
 
-## 9. Users — individual accounts, one shared household
+## 9. Users — individual accounts, households as the unit of privacy
 
 - **Each member has their own account** — email address and password. Sign-in is
   per person, so access can be granted and revoked one member at a time, and
   email has somewhere to go (§9b).
-- **Accounts gate entry; they do not partition data.** There is still **one
-  shared plan, one library, one ledger**. Nobody has a private recipe box.
-- **No roles.** A household is a handful of people who already share a kitchen;
-  anyone who can sign in can invite and remove members, the same way anyone can
-  tick off the shopping list.
+- **A household owns the data.** Every plan, recipe, pantry item, shopping list
+  and receipt belongs to exactly one household; a household is the shared
+  kitchen, and nothing crosses between two of them. Inside one there is still
+  **one shared plan, one library, one ledger** — nobody has a private recipe box
+  from the people they cook with.
+- **An account may belong to several households**, through a membership. A
+  browser acts in one at a time: the choice lives on the session row, so
+  removing somebody's membership stops them acting in that household on their
+  very next request, and a switcher appears only for the accounts that need one.
+- **Two kinds of role, deliberately unconnected.** A **household role**
+  (member / admin) says what you may do inside one kitchen. A **platform role**
+  says whether you may operate the installation — SMTP, backups, inviting new
+  households. Administering the box grants no routine access to anybody's
+  dinners; a platform admin who wants to see a household's plan has to be a
+  member of it.
 - **Passwords** are hashed with **scrypt** from the Node standard library — no
   hashing dependency to keep patched, for the same reason parsing and OCR are
   in-process (§12). Minimum ten characters; length beats character-class rules.
@@ -261,12 +271,34 @@ list → tick it off in the store → log what you paid → watch weekly spend.
     one always reports the same thing whether or not the address is registered —
     the endpoint is unauthenticated, and a different answer would turn it into a
     way to test which addresses exist.
-  - **Invitations** are the same machinery with warmer copy and a seven-day life.
-    An invited member exists with no password until they choose one.
-  - Resetting a password **signs out every device**, since a reset is the remedy
-    for a stolen session as much as a forgotten password.
   - **First run:** a fresh instance with no accounts opens `/setup` to create the
     first one, and closes it permanently once an account exists.
+  - Resetting a password **signs out every device**, since a reset is the remedy
+    for a stolen session as much as a forgotten password.
+- **Invitations are the only way in**, and they are records rather than
+  side effects. There is no open sign-up.
+  - An invitation is a **hashed token, bound to one normalized address,
+    single-use, seven days**. Forwarding the link to somebody else gets them a
+    refusal, not a household.
+  - **Nothing is created until it is accepted.** Under the old scheme the
+    account and the membership were made the moment the link was sent, which
+    made a person who never answered indistinguishable from a member who had
+    simply never logged in — already inside a private roster, and impossible to
+    withdraw. Now the offer and the membership are different things, and only
+    the offer exists up front.
+  - **Issuing a replacement revokes the previous unused one**, so "resend"
+    leaves exactly one live credential rather than one per copy of the mail.
+  - A **household invitation** adds the invitee to an existing household as one
+    of its admins, and is a household admin's to send. A **platform invitation**
+    creates a *new* household with the invitee as its first admin, and is the
+    platform admin's — it is the thing that grows the installation.
+  - An address that **already has an account accepts without touching its
+    password**: opening the link proves the same thing a reset link proves, and
+    asking somebody to reset a working password in order to join a second
+    kitchen teaches them that a mailed link means "type your password".
+  - **Admins are equals**: a household admin may remove a member, but not
+    remove or demote another admin. Two people who share a kitchen and have
+    fallen out should end up talking, not racing to click first.
 - Tailscale (§10) is still the primary gate; accounts are the second factor.
 
 ## 9b. Weekly newsletter
@@ -296,6 +328,15 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   nothing is one people learn to ignore. Last week's cooking and spending count
   as something: a household that cooked five dinners and simply hasn't planned
   next week yet is the one with the most to read.
+- **One digest per household, not per person.** Somebody who cooks in two
+  kitchens gets two mails about two different weeks, so the opt-in lives on the
+  membership and the one-click unsubscribe in a footer silences the household
+  whose footer it was — the token is signed over the member *and* the
+  household, so a link from one can't be edited into silencing the other.
+- **Every link in the mail selects its household first**, through `/open`.
+  Otherwise a reader who belongs to two would land in whichever one their
+  browser was last acting in, seeing another kitchen's week under this one's
+  subject line with nothing to say so.
 - **Sent over your own SMTP server**, not a mail API — no account to sign up
   for, no key to leak (§12).
 - **The app schedules it**, on a timer started from Next's `instrumentation`
@@ -395,15 +436,24 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   per-item checked state.
 - **PantryItem** — a name in the household's "always have" list.
 - **ShoppingTrip / Receipt** — date, store, total, receipt photo.
-- **User** — email, display name, scrypt password hash, newsletter opt-in (§9).
-- **Session** — a signed-in browser: hashed token, owner, sliding expiry (§9).
-- **AuthToken** — a single-use emailed link (reset / invitation), stored hashed,
-  with an expiry and a spent-at marker (§9).
+- **Household** — the private collection of plans, recipes, pantry, shopping and
+  spending that a kitchen shares. Every aggregate root above carries mandatory
+  household ownership (§9).
+- **HouseholdMembership** — which account may act in which household, in what
+  household role, and whether that household's weekly mail reaches them (§9b).
+- **User** — email, display name, scrypt password hash, platform role (§9).
+- **Session** — a signed-in browser: hashed token, owner, the household it is
+  currently acting in, sliding expiry (§9).
+- **Invitation** — an offer of membership: hashed token, the one address that
+  may accept, the inviter, whether it joins a household or creates one, an
+  expiry, and the timestamps that make it single-use and revocable (§9).
+- **AuthToken** — a single-use emailed password-reset link, stored hashed, with
+  an expiry and a spent-at marker (§9).
 - **NewsletterSend** — one digest, one member, one week; the unique constraint is
   what makes the weekly send idempotent (§9b).
 - **BackupRun** — one attempt at a nightly backup: the day it covers, whether it
   worked, the archive name and sizes, and the diagnosis if it didn't (§11).
-- **Settings** — household size.
+- **Settings** — household size, one row per household.
 
 ---
 

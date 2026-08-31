@@ -360,6 +360,7 @@ model Household {
   id          String                @id @default(cuid())
   name        String
   memberships HouseholdMembership[]
+  invitations Invitation[]
   recipes     Recipe[]
   weekPlans   WeekPlan[]
   pantryItems PantryItem[]
@@ -374,14 +375,23 @@ model Household {
 /// A user's role is per household. PlatformRole is deliberately separate:
 /// administering SMTP or backups must not grant routine access to meal data.
 model HouseholdMembership {
-  householdId    String
-  household      Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role           HouseholdRole @default(MEMBER)
-  activeSessions Session[]     @relation("ActiveHouseholdMembership")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  householdId     String
+  household       Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role            HouseholdRole @default(MEMBER)
+  /// Whether this household's weekly digest reaches this member (§9b).
+  ///
+  /// Per membership rather than per account: someone who cooks in two
+  /// households has two plans, two shopping lists and two reasons to hear
+  /// from us on a Saturday, and wanting one of those mails is not the same
+  /// as wanting both. A single account-wide flag made the one-click
+  /// unsubscribe in a digest footer silence a household the reader never
+  /// meant to leave.
+  newsletterOptIn Boolean       @default(true)
+  activeSessions  Session[]     @relation("ActiveHouseholdMembership")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   @@id([householdId, userId])
   @@index([userId])
@@ -398,13 +408,13 @@ model User {
   /// Scrypt hash (see src/lib/password.ts). Null between being invited and
   /// choosing a password, which is why invited members can't yet sign in.
   passwordHash    String?
-  /// Weekly digest opt-in (§9b). One-click unsubscribe flips this to false.
-  newsletterOptIn Boolean               @default(true)
   platformRole    PlatformRole          @default(USER)
   memberships     HouseholdMembership[]
   sessions        Session[]
   authTokens      AuthToken[]
   newsletters     NewsletterSend[]
+  invitationsSent Invitation[]          @relation("InvitationsSent")
+  invitationsUsed Invitation[]          @relation("InvitationsAccepted")
   lastLoginAt     DateTime?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
@@ -458,6 +468,88 @@ model AuthToken {
   createdAt DateTime         @default(now())
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Why a link was sent, and therefore what accepting it does (§9).
+///
+/// HOUSEHOLD adds the invitee to an existing household as one of its admins —
+/// the kitchen-sharing case, sent by somebody already in that kitchen.
+/// PLATFORM is the installation saying "you may have a household here": it
+/// belongs to no household yet, and accepting creates one with the invitee as
+/// its first admin.
+///
+/// The distinction is not cosmetic. A household admin may only ever mint the
+/// first kind, and only for their own household; the second is the one that
+/// grows the installation, so it stays with the platform admin (§9, Phase 5).
+enum InvitationKind {
+  HOUSEHOLD
+  PLATFORM
+}
+
+/// A single-use, email-bound, seven-day invitation (§9).
+///
+/// Separate from AuthToken, which invitations used to borrow, because the two
+/// answer different questions. A reset token asks "is this the person who owns
+/// this account?" and therefore presupposes an account. An invitation asks "may
+/// this address join?" and must exist *before* any account or membership does —
+/// the old flow created the user row and the membership at invitation time, so
+/// an unaccepted invitation was indistinguishable from a member who had simply
+/// never logged in, an unrevokable half-member sitting inside a private
+/// household's roster.
+///
+/// Nothing here is a credential the recipient chooses. `tokenHash` is a SHA-256
+/// of the random link token, stored the way session and reset tokens are, so a
+/// database dump hands over no live invitations. `email` is normalized and
+/// checked at acceptance: the link is bound to the mailbox it was sent to, so
+/// forwarding it to somebody else gets them a refusal rather than a household.
+///
+/// Three timestamps rather than a status column, because each one is a fact
+/// with a time attached and a status would be a summary of them that can drift:
+/// `expiresAt` is set at issue, `acceptedAt` is the atomic claim that makes the
+/// link single-use (an `updateMany` filtered on null, exactly as AuthToken
+/// does), and `revokedAt` is an admin changing their mind. Rows are kept after
+/// all three, since who was invited where, by whom, and what became of it is
+/// the audit trail Phase 6 needs.
+model Invitation {
+  id            String         @id @default(cuid())
+  /// SHA-256 of the emailed token. The raw value exists only in the mail.
+  tokenHash     String         @unique
+  /// Lowercased at write time, and the only address that may accept.
+  email         String
+  /// The name the inviter typed, used to greet the invitee and to prefill the
+  /// account they are about to create. Not a promise: they may type another.
+  invitedName   String?
+  kind          InvitationKind
+  /// The household being joined. A PLATFORM invitation has none until it is
+  /// accepted, at which point it records the household it created — a database
+  /// check constraint holds both halves of that.
+  householdId   String?
+  household     Household?     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// A name suggested for the household a PLATFORM invitation will create.
+  /// The invitee may replace it; null means they will be asked for one.
+  householdName String?
+  /// Who sent it. Nullable only so removing an admin doesn't erase the record
+  /// of what they did — the invitation outlives the account that issued it.
+  invitedById   String?
+  invitedBy     User?          @relation("InvitationsSent", fields: [invitedById], references: [id], onDelete: SetNull)
+  expiresAt     DateTime
+  /// Set by the atomic claim at acceptance; a set value means spent forever.
+  acceptedAt    DateTime?
+  /// The account that accepted — the invitee's existing account, or the one
+  /// created in the same transaction.
+  acceptedById  String?
+  acceptedBy    User?          @relation("InvitationsAccepted", fields: [acceptedById], references: [id], onDelete: SetNull)
+  /// Set when an admin withdraws it, or when a replacement invitation for the
+  /// same address and target supersedes it.
+  revokedAt     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  /// Answering "is there a live invitation for this address?" — asked on every
+  /// issue, to supersede the previous one, and on every acceptance.
+  @@index([email])
+  @@index([householdId])
   @@index([expiresAt])
 }
 

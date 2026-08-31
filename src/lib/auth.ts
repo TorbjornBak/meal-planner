@@ -366,19 +366,27 @@ export async function isValidCaptureToken(
 
 /**
  * The one-click unsubscribe token in every newsletter footer (§9b). Derived
- * from AUTH_SECRET and the user id rather than stored, so an unsubscribe link
- * keeps working for as long as the account does and costs no table.
+ * from AUTH_SECRET, the user id and the household rather than stored, so an
+ * unsubscribe link keeps working for as long as the membership does and costs
+ * no table.
+ *
+ * The household is in the HMAC, not merely in the query string, because the
+ * digest opt-in is per membership: a reader in two households who presses
+ * their mail client's unsubscribe button means "stop *this* mail", and a token
+ * that covered only the user id would let a link from one household silence
+ * the other — or, worse, be edited in the URL bar to do so deliberately.
  */
-export function unsubscribeToken(userId: string): Promise<string> {
-  return hmacHex(`unsubscribe:${userId}`);
+export function unsubscribeToken(userId: string, householdId: string): Promise<string> {
+  return hmacHex(`unsubscribe:${userId}:${householdId}`);
 }
 
 export async function isValidUnsubscribeToken(
   userId: string,
+  householdId: string,
   token: string | undefined,
 ): Promise<boolean> {
   if (!token) return false;
-  return safeEqual(token, await unsubscribeToken(userId));
+  return safeEqual(token, await unsubscribeToken(userId, householdId));
 }
 
 // -----------------------------------------------------------------------------

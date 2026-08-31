@@ -52,15 +52,24 @@ function addWeeks(weekStart: Date, n: number): Date {
 }
 
 /**
- * Who the digest is for: members who asked for it and can act on it.
+ * Who the digest is for: memberships that asked for it, held by accounts that
+ * can act on it.
  *
- * An invited member who hasn't set a password yet has no account to log into,
- * so a mail full of plan links would be a dead end. Declared once because two
- * queries ask the question — who to send to, and whether everyone already has
- * their copy — and an answer that differed between them would either skip a
- * member for the week or re-poll a finished week forever.
+ * A membership rather than a user, because the opt-in is per household (§9b):
+ * somebody who cooks in two kitchens can want Saturday's mail about one of
+ * them and not the other. An account that hasn't set a password yet has
+ * nothing to log into, so a mail full of plan links would be a dead end — that
+ * half stays a fact about the user.
+ *
+ * Declared once because two queries ask the question — who to send to, and
+ * whether everyone already has their copy — and an answer that differed
+ * between them would either skip a member for the week or re-poll a finished
+ * week forever.
  */
-const ELIGIBLE = { newsletterOptIn: true, passwordHash: { not: null } } as const;
+const ELIGIBLE_MEMBERSHIP = {
+  newsletterOptIn: true,
+  user: { passwordHash: { not: null } },
+} as const;
 
 export interface DigestContent {
   weekStart: Date;
@@ -230,13 +239,23 @@ function foldSpend(
   };
 }
 
-/** Build one member's copy: shared content, personal greeting and opt-out. */
+/**
+ * Build one member's copy: shared content, personal greeting and opt-out.
+ *
+ * Every link goes through /open, which selects the household the mail is about
+ * before showing anything. A reader who belongs to two households would
+ * otherwise land in whichever one their browser was last acting in — seeing
+ * another kitchen's week under this one's subject line, with nothing to say so.
+ */
 export async function composeFor(
   user: { id: string; name: string | null },
+  householdId: string,
   content: DigestContent,
 ): Promise<ReturnType<typeof renderNewsletter> & { input: NewsletterInput }> {
   const weekKey = content.weekStart.toISOString().slice(0, 10);
-  const token = await unsubscribeToken(user.id);
+  const token = await unsubscribeToken(user.id, householdId);
+  const inHousehold = (path: string) =>
+    appUrl(`/open?h=${encodeURIComponent(householdId)}&next=${encodeURIComponent(path)}`);
 
   const input: NewsletterInput = {
     name: user.name,
@@ -245,11 +264,13 @@ export async function composeFor(
     newRecipes: content.newRecipes,
     lookBack: content.lookBack,
     links: {
-      plan: appUrl(`/plan?weekStart=${weekKey}`),
-      shopping: appUrl("/shopping"),
-      spending: appUrl("/spending"),
-      unsubscribe: appUrl(`/api/newsletter/unsubscribe?u=${user.id}&t=${token}`),
-      recipe: (id: string) => appUrl(`/recipes/${id}`),
+      plan: inHousehold(`/plan?weekStart=${weekKey}`),
+      shopping: inHousehold("/shopping"),
+      spending: inHousehold("/spending"),
+      unsubscribe: appUrl(
+        `/api/newsletter/unsubscribe?u=${user.id}&h=${encodeURIComponent(householdId)}&t=${token}`,
+      ),
+      recipe: (id: string) => inHousehold(`/recipes/${id}`),
     },
   };
 
@@ -297,7 +318,7 @@ export async function sendWeeklyDigest(opts: {
       memberships: {
         some: {
           ...(opts.onlyUserId ? { userId: opts.onlyUserId } : {}),
-          ...(opts.force ? {} : { user: ELIGIBLE }),
+          ...(opts.force ? {} : ELIGIBLE_MEMBERSHIP),
         },
       },
     },
@@ -305,14 +326,15 @@ export async function sendWeeklyDigest(opts: {
   });
 
   for (const household of households) {
-    const users = await prisma.user.findMany({
+    const memberships = await prisma.householdMembership.findMany({
       where: {
-        ...(opts.onlyUserId ? { id: opts.onlyUserId } : {}),
-        ...(opts.force ? {} : ELIGIBLE),
-        memberships: { some: { householdId: household.id } },
+        householdId: household.id,
+        ...(opts.onlyUserId ? { userId: opts.onlyUserId } : {}),
+        ...(opts.force ? {} : ELIGIBLE_MEMBERSHIP),
       },
-      select: { id: true, email: true, name: true, newsletterOptIn: true },
+      select: { user: { select: { id: true, email: true, name: true } } },
     });
+    const users = memberships.map((m) => m.user);
     const content = await gatherDigest(household.id, weekStart, now);
 
     if (
@@ -347,7 +369,7 @@ export async function sendWeeklyDigest(opts: {
         }
       }
 
-      const mail = await composeFor(user, content);
+      const mail = await composeFor(user, household.id, content);
 
       try {
         await sendMail({
@@ -389,7 +411,7 @@ export async function sendWeeklyDigest(opts: {
 async function allDelivered(weekStart: Date): Promise<boolean> {
   const [memberships, sends] = await Promise.all([
     prisma.householdMembership.findMany({
-      where: { user: ELIGIBLE },
+      where: ELIGIBLE_MEMBERSHIP,
       select: { householdId: true, userId: true },
     }),
     prisma.newsletterSend.findMany({

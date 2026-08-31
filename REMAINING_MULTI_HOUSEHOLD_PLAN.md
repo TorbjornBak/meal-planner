@@ -2,25 +2,28 @@
 
 ## Stopping point
 
-Phases 1–3 are complete:
+Phases 1–4 are complete:
 
 - [x] Add households, memberships, household/platform roles, and deterministic migration of existing data.
 - [x] Store an active household in each session and provide authorization helpers.
 - [x] Require household ownership throughout plans, recipes, pantry, shopping, spending, settings, capture, dashboard, and weekly-digest queries.
+- [x] Replace the account-shaped invitation with an invitation record, and add household administration.
 
 Keep the app behind **Tailscale Serve** for the friend trial. Do not enable Funnel or another public ingress until the remaining security phase is complete.
 
 ## Phase 4 — invitations and household administration
 
-- [ ] Add a dedicated invitation record containing a hashed token, normalized email, inviter, invitation type, optional target household, expiry, accepted timestamp, and revoked timestamp.
-- [ ] Make links email-bound, single-use, seven-day credentials. Creating a replacement invitation revokes the previous unused one.
-- [ ] Add a public `/invite/<token>` acceptance page; keep ordinary `/signup` unavailable.
-- [ ] Create membership only when the link is accepted. A household invitation grants household-admin membership; a platform invitation creates a new household with the invitee as its first household admin.
-- [ ] Let an already-registered email accept an invitation without changing its password.
-- [ ] Let household admins send/revoke invitations and view their household roster. They may remove members but may not demote or remove another household admin.
-- [ ] Add an active-household switcher for accounts belonging to multiple households.
-- [ ] Scope weekly-email preferences per household and make digest links select the relevant household before opening app content.
-- [ ] Add integration tests for expiry, replay, revocation, email mismatch, existing users, concurrent acceptance, and cross-household denial.
+- [x] Add a dedicated invitation record containing a hashed token, normalized email, inviter, invitation type, optional target household, expiry, accepted timestamp, and revoked timestamp. — `Invitation` in `prisma/schema.prisma`, migration `20260831150000_add_household_invitations`.
+- [x] Make links email-bound, single-use, seven-day credentials. Creating a replacement invitation revokes the previous unused one. — `issueInvitation` supersedes in one transaction; `acceptInvitation` claims with an `updateMany` filtered on `acceptedAt: null`.
+- [x] Add a public `/invite/<token>` acceptance page; keep ordinary `/signup` unavailable. — there is no signup route, and middleware admits only `/invite/` and `/api/invitations/accept`.
+- [x] Create membership only when the link is accepted. A household invitation grants household-admin membership; a platform invitation creates a new household with the invitee as its first household admin. — nothing creates `PLATFORM` invitations yet; the screen that does is Phase 5's.
+- [x] Let an already-registered email accept an invitation without changing its password. — the `link-account` branch of `acceptancePlan`.
+- [x] Let household admins send/revoke invitations and view their household roster. They may remove members but may not demote or remove another household admin. — `memberRemovalRefusal`, enforced in `/api/users` and reflected as a `removable` flag.
+- [x] Add an active-household switcher for accounts belonging to multiple households.
+- [x] Scope weekly-email preferences per household and make digest links select the relevant household before opening app content. — the opt-in moved to `HouseholdMembership`, the unsubscribe HMAC covers the household, and every digest link goes through `/open`.
+- [x] Add integration tests for expiry, replay, revocation, email mismatch, existing users, concurrent acceptance, and cross-household denial. — `src/lib/invitations.test.mjs` and `src/lib/invitations.integration.test.mjs`; the integration file skips without a database, and no database has been available to run it here.
+
+Carried into Phase 6: accounts invited under the old scheme still hold a membership and a live `INVITE` `AuthToken`, and still finish through `/reset`. Removing that path is Phase 6's "remove obsolete invitation/reset paths".
 
 ## Phase 5 — platform administration
 
