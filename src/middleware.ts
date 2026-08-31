@@ -20,6 +20,12 @@ function isPublic(pathname: string): boolean {
     pathname === "/api/password/forgot" ||
     pathname === "/api/password/reset" ||
     pathname.startsWith("/reset/") ||
+    // Accepting an invitation is the one way into the app for somebody with no
+    // account at all, so the page and the endpoint that spends the link both
+    // have to answer without a session. The link itself is the credential:
+    // hashed, single-use, seven days, bound to one address (§9).
+    pathname.startsWith("/invite/") ||
+    pathname === "/api/invitations/accept" ||
     // First-run bootstrap: a fresh deployment has nobody to sign in as.
     pathname === "/setup" ||
     pathname === "/api/setup" ||

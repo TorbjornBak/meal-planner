@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Edit / delete a logged shopping trip (§7). PATCH takes the same multipart form
 // as POST /api/trips so the client can reuse it: any of date / store / total,
@@ -10,6 +11,8 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const form = await req.formData();
 
@@ -37,12 +40,17 @@ export async function PATCH(
     data.total = total; // Prisma coerces the string into the Money column
   }
 
-  const exists = await prisma.shoppingTrip.findUnique({ where: { id } });
+  const exists = await prisma.shoppingTrip.findFirst({
+    where: { id, householdId: context.household.id },
+  });
   if (!exists) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  await prisma.shoppingTrip.update({ where: { id }, data });
+  await prisma.shoppingTrip.update({
+    where: { id, householdId: context.household.id },
+    data,
+  });
 
   // Receipt photo: remove, replace/add, or leave untouched.
   const photo = form.get("photo");
@@ -70,7 +78,12 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  await prisma.shoppingTrip.delete({ where: { id } });
+  const deleted = await prisma.shoppingTrip.deleteMany({
+    where: { id, householdId: context.household.id },
+  });
+  if (deleted.count === 0) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { ServiceWorkerRegistrar } from "./sw-register";
+import { HouseholdSwitcher } from "@/components/HouseholdSwitcher";
 
 export const metadata: Metadata = {
   title: "MealPlanner",
@@ -33,6 +34,7 @@ export default function RootLayout({
           <Link href="/pantry">Pantry</Link>
           <Link href="/spending">Spending</Link>
           <Link href="/settings">Settings</Link>
+          <HouseholdSwitcher />
         </nav>
         <main className="container">{children}</main>
       </body>

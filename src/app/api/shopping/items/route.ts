@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { ingredientKey } from "@/lib/keys";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 /**
  * Adding a line to the shopping list by hand (§5, §6).
@@ -31,6 +32,8 @@ const PostInput = z.object({
 
 // POST /api/shopping/items — add a hand-written line to a week's list.
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const parsed = PostInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -49,7 +52,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const plan = await prisma.weekPlan.findUnique({ where: { id: weekPlanId } });
+  const plan = await prisma.weekPlan.findFirst({
+    where: { id: weekPlanId, householdId: context.household.id },
+  });
   if (!plan) {
     return NextResponse.json({ error: "week plan not found" }, { status: 404 });
   }

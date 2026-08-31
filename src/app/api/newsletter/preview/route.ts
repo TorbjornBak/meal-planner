@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/currentUser";
+import { currentHouseholdContext } from "@/lib/currentUser";
 import { isMailConfigured } from "@/lib/mail";
 import { sendWeeklyDigest } from "@/lib/weeklyDigest";
 import { describeMailError } from "@/lib/mailError";
@@ -13,14 +13,18 @@ import { describeMailError } from "@/lib/mailError";
  * person asking.
  */
 export async function POST() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   if (!isMailConfigured()) {
     return NextResponse.json({ error: "mail-not-configured" }, { status: 503 });
   }
 
-  const report = await sendWeeklyDigest({ onlyUserId: user.id, force: true });
+  const report = await sendWeeklyDigest({
+    householdId: context.household.id,
+    onlyUserId: context.user.id,
+    force: true,
+  });
 
   if (report.sent.length === 0) {
     return NextResponse.json(

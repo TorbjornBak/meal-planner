@@ -13,6 +13,7 @@ interface Account {
   id: string;
   email: string;
   name: string | null;
+  household: { id: string; name: string; newsletterOptIn: boolean } | null;
   newsletterOptIn: boolean;
   mailConfigured: boolean;
 }
@@ -225,7 +226,16 @@ export function AccountCard() {
       <div className="card">
         <h2>Weekly email</h2>
         <p className="muted">
-          Once a week: the coming week&apos;s dinners and any recipes added to the library.
+          Once a week: the coming week&apos;s dinners and any recipes added to the library
+          {account.household ? (
+            <>
+              {" "}
+              — for <strong>{account.household.name}</strong>. This is set per household, so it
+              follows whichever one you&apos;re currently in, not your account as a whole.
+            </>
+          ) : (
+            "."
+          )}
         </p>
 
         <label style={{ display: "block", marginTop: 8 }}>
@@ -234,7 +244,7 @@ export function AccountCard() {
             checked={account.newsletterOptIn}
             onChange={(e) => toggleNewsletter(e.target.checked)}
           />{" "}
-          Email me the weekly plan
+          Email me {account.household ? `${account.household.name}'s` : "the"} weekly plan
         </label>
 
         {account.mailConfigured ? (

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchPageHtml } from "@/lib/fetchPage";
 import { parseRecipeHtml } from "@/lib/html";
 import { createRecipeFromHtml } from "@/lib/importRecipe";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // POST /api/import — paste-a-URL import (§1, the fast path). Session-protected
 // by the middleware (a normal in-app request, unlike cross-origin /api/capture).
@@ -12,6 +13,8 @@ import { createRecipeFromHtml } from "@/lib/importRecipe";
 // (bot wall, JS-only, paywall), it returns a clear message pointing at the
 // bookmarklet, which always works because it's your real browser.
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { url } = await req.json().catch(() => ({ url: "" }));
   if (typeof url !== "string" || !/^https?:\/\/\S+/i.test(url.trim())) {
     return NextResponse.json(
@@ -44,6 +47,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const recipe = await createRecipeFromHtml(page.html, page.finalUrl, draft);
+  const recipe = await createRecipeFromHtml(
+    context.household.id,
+    page.html,
+    page.finalUrl,
+    draft,
+  );
   return NextResponse.json({ id: recipe.id, name: recipe.name }, { status: 201 });
 }

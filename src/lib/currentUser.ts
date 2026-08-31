@@ -7,13 +7,24 @@
  */
 
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, getSessionUser } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  getSessionHouseholdContext,
+  getSessionUser,
+  type HouseholdSessionContext,
+} from "@/lib/auth";
 import type { User } from "@prisma/client";
 
 /** The signed-in user, or null. */
 export async function currentUser(): Promise<User | null> {
   const jar = await cookies();
   return getSessionUser(jar.get(SESSION_COOKIE)?.value);
+}
+
+/** The signed-in browser's active household, or null when none is available. */
+export async function currentHouseholdContext(): Promise<HouseholdSessionContext | null> {
+  const jar = await cookies();
+  return getSessionHouseholdContext(jar.get(SESSION_COOKIE)?.value);
 }
 
 /**
@@ -28,9 +39,37 @@ export async function requireUser(): Promise<User> {
   return user;
 }
 
+/** Require a signed-in user with an active household membership. */
+export async function requireHouseholdContext(): Promise<HouseholdSessionContext> {
+  const context = await currentHouseholdContext();
+  if (!context) throw new UnauthorizedError();
+  return context;
+}
+
+/** Require administration rights in the active household. */
+export async function requireHouseholdAdmin(): Promise<HouseholdSessionContext> {
+  const context = await requireHouseholdContext();
+  if (context.role !== "ADMIN") throw new ForbiddenError();
+  return context;
+}
+
+/** Require installation-wide operational rights, without granting meal-data access. */
+export async function requirePlatformAdmin(): Promise<User> {
+  const user = await requireUser();
+  if (user.platformRole !== "ADMIN") throw new ForbiddenError();
+  return user;
+}
+
 export class UnauthorizedError extends Error {
   constructor() {
     super("unauthorized");
     this.name = "UnauthorizedError";
+  }
+}
+
+export class ForbiddenError extends Error {
+  constructor() {
+    super("forbidden");
+    this.name = "ForbiddenError";
   }
 }

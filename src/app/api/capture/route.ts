@@ -21,21 +21,25 @@ export function OPTIONS() {
 }
 
 export async function POST(req: Request) {
-  let body: { token?: string; url?: string; html?: string };
+  let body: { householdId?: string; token?: string; url?: string; html?: string };
   try {
     body = JSON.parse(await req.text());
   } catch {
     return NextResponse.json({ error: "bad body" }, { status: 400, headers: CORS });
   }
 
-  if (!(await isValidCaptureToken(body.token))) {
+  if (!(await isValidCaptureToken(body.householdId, body.token))) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401, headers: CORS });
   }
   if (!body.html || typeof body.html !== "string") {
     return NextResponse.json({ error: "html required" }, { status: 400, headers: CORS });
   }
 
-  const recipe = await createRecipeFromHtml(body.html, body.url ?? null);
+  const recipe = await createRecipeFromHtml(
+    body.householdId!,
+    body.html,
+    body.url ?? null,
+  );
 
   return NextResponse.json({ id: recipe.id, name: recipe.name }, { headers: CORS });
 }

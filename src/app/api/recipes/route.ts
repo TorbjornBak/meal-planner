@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 import { RECIPE_KINDS } from "@/lib/recipeKind";
 import { RECIPE_CATEGORIES } from "@/lib/recipeCategory";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Recipe library CRUD (§2).
 
@@ -54,6 +55,9 @@ interface RecipeListExtras {
 // GET /api/recipes — list the library (favourites first, then by name), each
 // row carrying the week it was last cooked (§2, §3).
 export async function GET() {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   // Two queries for the whole library, and two however many recipes there are
   // — never one per recipe.
   //
@@ -70,11 +74,13 @@ export async function GET() {
   // cost. Both queries go out at once; neither depends on the other.
   const [recipes, slots] = await Promise.all([
     prisma.recipe.findMany({
+      where: { householdId },
       orderBy: [{ isFavorite: "desc" }, { name: "asc" }],
       omit: OMIT_RECIPE_BLOBS,
       include: { ingredients: { orderBy: { position: "asc" } } },
     }),
     prisma.dinnerSlot.findMany({
+      where: { weekPlan: { householdId } },
       select: { recipeId: true, weekPlan: { select: { weekStart: true } } },
     }),
   ]);
@@ -98,6 +104,8 @@ export async function GET() {
 
 // POST /api/recipes — save a reviewed-and-edited recipe (§1, §2).
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const parsed = RecipeInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -107,6 +115,7 @@ export async function POST(req: Request) {
 
   const recipe = await prisma.recipe.create({
     data: {
+      householdId: context.household.id,
       name,
       ...(kind ? { kind } : {}),
       category: category ?? null,

@@ -1,9 +1,8 @@
 /**
  * Per-user sessions and emailed one-time tokens (§9).
  *
- * Accounts gate sign-in; they do not partition data. Every member sees the
- * same plan, library and ledger — the household model is unchanged, it just
- * has names and email addresses attached now.
+ * Accounts gate sign-in; household memberships partition private data. A
+ * session remembers which of the user's households the browser is acting in.
  *
  * Sessions live in the database rather than in a self-contained signed cookie
  * so that signing out, or removing a member, takes effect on the next request
@@ -15,7 +14,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import type { AuthTokenPurpose, User } from "@prisma/client";
+import type { AuthTokenPurpose, HouseholdRole, User } from "@prisma/client";
 
 export const SESSION_COOKIE = "mp_session";
 
@@ -123,26 +122,48 @@ export function sessionCookieOptions(maxAgeSeconds: number) {
 
 export const SESSION_MAX_AGE_SECONDS = Math.floor(SESSION_TTL_MS / 1000);
 
+async function membershipForUser(userId: string, householdId?: string) {
+  if (householdId) {
+    return prisma.householdMembership.findUnique({
+      where: { householdId_userId: { householdId, userId } },
+      include: { household: { select: { id: true, name: true } } },
+    });
+  }
+
+  return prisma.householdMembership.findFirst({
+    where: { userId },
+    orderBy: [{ createdAt: "asc" }, { householdId: "asc" }],
+    include: { household: { select: { id: true, name: true } } },
+  });
+}
+
 /** Open a session for a user and return the raw cookie value to hand back. */
-export async function createSession(userId: string): Promise<string> {
+export async function createSession(userId: string, householdId?: string): Promise<string> {
   const raw = generateToken();
+  const membership = await membershipForUser(userId, householdId);
+  if (householdId && !membership) {
+    throw new Error("user is not a member of the requested household");
+  }
+
   await prisma.session.create({
     data: {
       tokenHash: await hashToken(raw),
       userId,
+      activeHouseholdId: membership?.householdId,
       expiresAt: new Date(Date.now() + SESSION_TTL_MS),
     },
   });
   return raw;
 }
 
-/**
- * Resolve a cookie value to the signed-in user, or null.
- *
- * Expired rows are deleted on sight rather than left for a sweep, so an
- * expired cookie cleans up after itself.
- */
-export async function getSessionUser(raw: string | undefined): Promise<User | null> {
+type ResolvedSession = {
+  id: string;
+  userId: string;
+  activeHouseholdId: string | null;
+  user: User;
+};
+
+async function resolveSession(raw: string | undefined): Promise<ResolvedSession | null> {
   if (!raw) return null;
 
   const session = await prisma.session.findUnique({
@@ -166,7 +187,80 @@ export async function getSessionUser(raw: string | undefined): Promise<User | nu
       .catch(() => {});
   }
 
-  return session.user;
+  return session;
+}
+
+/**
+ * Resolve a cookie value to the signed-in user, or null.
+ *
+ * Expired rows are deleted on sight rather than left for a sweep, so an
+ * expired cookie cleans up after itself.
+ */
+export async function getSessionUser(raw: string | undefined): Promise<User | null> {
+  return (await resolveSession(raw))?.user ?? null;
+}
+
+export type HouseholdSessionContext = {
+  sessionId: string;
+  user: User;
+  household: { id: string; name: string };
+  role: HouseholdRole;
+};
+
+/**
+ * Resolve the session's selected household through membership.
+ *
+ * Old sessions created before active-household support are repaired lazily by
+ * selecting the user's oldest membership. No membership means no household
+ * context: the account may authenticate, but cannot reach private data.
+ */
+export async function getSessionHouseholdContext(
+  raw: string | undefined,
+): Promise<HouseholdSessionContext | null> {
+  const session = await resolveSession(raw);
+  if (!session) return null;
+
+  const membership = await membershipForUser(
+    session.userId,
+    session.activeHouseholdId ?? undefined,
+  );
+
+  if (!membership) return null;
+
+  if (session.activeHouseholdId !== membership.householdId) {
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { activeHouseholdId: membership.householdId },
+    });
+  }
+
+  return {
+    sessionId: session.id,
+    user: session.user,
+    household: membership.household,
+    role: membership.role,
+  };
+}
+
+/** Select another household for this browser, only if the user belongs to it. */
+export async function selectSessionHousehold(
+  raw: string | undefined,
+  householdId: string,
+): Promise<boolean> {
+  const session = await resolveSession(raw);
+  if (!session) return false;
+
+  const membership = await prisma.householdMembership.findUnique({
+    where: { householdId_userId: { householdId, userId: session.userId } },
+    select: { householdId: true },
+  });
+  if (!membership) return false;
+
+  await prisma.session.update({
+    where: { id: session.id },
+    data: { activeHouseholdId: membership.householdId },
+  });
+  return true;
 }
 
 /** Sign out one browser. Unknown tokens are a no-op, not an error. */
@@ -258,30 +352,41 @@ export async function redeemAuthToken(
  * from the session cookie so the cross-origin capture request can authenticate
  * without one. Derived from AUTH_SECRET, so it's stable and needs no storage.
  */
-export function captureToken(): Promise<string> {
-  return hmacHex("capture");
+export function captureToken(householdId: string): Promise<string> {
+  return hmacHex(`capture:${householdId}`);
 }
 
-export async function isValidCaptureToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
-  return safeEqual(token, await captureToken());
+export async function isValidCaptureToken(
+  householdId: string | undefined,
+  token: string | undefined,
+): Promise<boolean> {
+  if (!householdId || !token) return false;
+  return safeEqual(token, await captureToken(householdId));
 }
 
 /**
  * The one-click unsubscribe token in every newsletter footer (§9b). Derived
- * from AUTH_SECRET and the user id rather than stored, so an unsubscribe link
- * keeps working for as long as the account does and costs no table.
+ * from AUTH_SECRET, the user id and the household rather than stored, so an
+ * unsubscribe link keeps working for as long as the membership does and costs
+ * no table.
+ *
+ * The household is in the HMAC, not merely in the query string, because the
+ * digest opt-in is per membership: a reader in two households who presses
+ * their mail client's unsubscribe button means "stop *this* mail", and a token
+ * that covered only the user id would let a link from one household silence
+ * the other — or, worse, be edited in the URL bar to do so deliberately.
  */
-export function unsubscribeToken(userId: string): Promise<string> {
-  return hmacHex(`unsubscribe:${userId}`);
+export function unsubscribeToken(userId: string, householdId: string): Promise<string> {
+  return hmacHex(`unsubscribe:${userId}:${householdId}`);
 }
 
 export async function isValidUnsubscribeToken(
   userId: string,
+  householdId: string,
   token: string | undefined,
 ): Promise<boolean> {
   if (!token) return false;
-  return safeEqual(token, await unsubscribeToken(userId));
+  return safeEqual(token, await unsubscribeToken(userId, householdId));
 }
 
 // -----------------------------------------------------------------------------
