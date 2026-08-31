@@ -370,13 +370,14 @@ model Household {
 /// A user's role is per household. PlatformRole is deliberately separate:
 /// administering SMTP or backups must not grant routine access to meal data.
 model HouseholdMembership {
-  householdId String
-  household   Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role        HouseholdRole @default(MEMBER)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  householdId    String
+  household      Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           HouseholdRole @default(MEMBER)
+  activeSessions Session[]     @relation("ActiveHouseholdMembership")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@id([householdId, userId])
   @@index([userId])
@@ -408,19 +409,24 @@ model User {
 /// A signed-in browser. Server-side so signing out (or removing a member)
 /// takes effect immediately, unlike a self-contained signed cookie.
 model Session {
-  id         String   @id @default(cuid())
+  id                String               @id @default(cuid())
   /// SHA-256 of the cookie's random token. The raw token is never stored, so
   /// a database leak doesn't hand over live sessions.
-  tokenHash  String   @unique
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  tokenHash         String               @unique
+  userId            String
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The household this browser is currently acting in. The composite
+  /// relation makes selecting a household without membership impossible.
+  activeHouseholdId String?
+  activeMembership  HouseholdMembership? @relation("ActiveHouseholdMembership", fields: [activeHouseholdId, userId], references: [householdId, userId], onDelete: Cascade)
+  expiresAt         DateTime
+  createdAt         DateTime             @default(now())
   /// Refreshed lazily so an active session slides forward rather than expiring
   /// mid-shop.
-  lastSeenAt DateTime @default(now())
+  lastSeenAt        DateTime             @default(now())
 
   @@index([userId])
+  @@index([activeHouseholdId, userId])
   @@index([expiresAt])
 }
 
