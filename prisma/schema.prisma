@@ -1,7 +1,8 @@
 // MealPlanner v1 data model — see DESIGN.md §"Data model sketch".
 //
-// One household, one shared plan/library/ledger. Individual accounts exist for
-// sign-in and for addressing email, not for isolating data (§9).
+// Every plan, library and ledger belongs to a household. Accounts may belong to
+// several households through HouseholdMembership; request scoping will make
+// that ownership mandatory after this expand/backfill migration (§9).
 
 generator client {
   provider = "prisma-client-js"
@@ -73,6 +74,9 @@ enum RecipeCategory {
 /// Everything pasted-and-parsed is saved here and accumulates into the library.
 model Recipe {
   id                  String           @id @default(cuid())
+  /// Nullable while existing routes are moved behind household context.
+  householdId         String?
+  household           Household?       @relation(fields: [householdId], references: [id], onDelete: Cascade)
   name                String
   /// Dinner, side, drink or dessert (§2c). Defaults to DINNER so every recipe
   /// that existed before the sections did stays where its household left it.
@@ -126,6 +130,7 @@ model Recipe {
   @@index([isFavorite])
   @@index([kind])
   @@index([category])
+  @@index([householdId])
 }
 
 /// One "name / quantity / unit" line belonging to a recipe. Corrected by the
@@ -154,6 +159,9 @@ model IngredientLine {
 /// (leftovers / eating out).
 model WeekPlan {
   id           String        @id @default(cuid())
+  /// Nullable while existing routes are moved behind household context.
+  householdId  String?
+  household    Household?    @relation(fields: [householdId], references: [id], onDelete: Cascade)
   /// The Monday of the week (date-only), unique per household.
   weekStart    DateTime      @unique @db.Date
   slots        DinnerSlot[]
@@ -162,6 +170,11 @@ model WeekPlan {
   shoppingList ShoppingList?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+
+  /// Kept alongside the legacy global constraint until all callers scope by
+  /// household, at which point the global constraint can safely be removed.
+  @@unique([householdId, weekStart])
+  @@index([householdId])
 }
 
 /// One dinner assigned to a night. A night can hold several (§3); an empty
@@ -282,11 +295,16 @@ model ShoppingListItem {
 /// The household's "things we always have" list. Matched by name against the
 /// shopping list to move items into the pantry section (§5).
 model PantryItem {
-  id        String   @id @default(cuid())
-  name      String
+  id          String     @id @default(cuid())
+  householdId String?
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  name        String
   /// Normalized key matched against ShoppingListItem.ingredientKey.
-  nameKey   String   @unique
-  createdAt DateTime @default(now())
+  nameKey     String     @unique
+  createdAt   DateTime   @default(now())
+
+  @@unique([householdId, nameKey])
+  @@index([householdId])
 }
 
 // -----------------------------------------------------------------------------
@@ -296,15 +314,18 @@ model PantryItem {
 /// One grocery trip. Loosely coupled to the shopping list — no item-level
 /// cost attribution (§7).
 model ShoppingTrip {
-  id        String   @id @default(cuid())
-  date      DateTime @db.Date
-  store     String
+  id          String     @id @default(cuid())
+  householdId String?
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  date        DateTime   @db.Date
+  store       String
   /// The typed-in receipt total.
-  total     Decimal  @db.Money
-  receipt   Receipt?
-  createdAt DateTime @default(now())
+  total       Decimal    @db.Money
+  receipt     Receipt?
+  createdAt   DateTime   @default(now())
 
   @@index([date])
+  @@index([householdId])
 }
 
 /// The receipt photo for a trip, stored in the database (§7). No OCR.
@@ -321,26 +342,67 @@ model Receipt {
 // Accounts (§9)
 // -----------------------------------------------------------------------------
 
-/// One household member. Accounts exist so sign-in can be revoked per person
-/// and so email has somewhere to go — *not* to isolate data. Every member sees
-/// the same plan, library and ledger.
+enum PlatformRole {
+  USER
+  ADMIN
+}
+
+enum HouseholdRole {
+  MEMBER
+  ADMIN
+}
+
+/// A private collection of plans, recipes, shopping and spending data.
+model Household {
+  id          String                @id @default(cuid())
+  name        String
+  memberships HouseholdMembership[]
+  recipes     Recipe[]
+  weekPlans   WeekPlan[]
+  pantryItems PantryItem[]
+  trips       ShoppingTrip[]
+  settings    Settings?
+  newsletters NewsletterSend[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+}
+
+/// A user's role is per household. PlatformRole is deliberately separate:
+/// administering SMTP or backups must not grant routine access to meal data.
+model HouseholdMembership {
+  householdId String
+  household   Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        HouseholdRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@id([householdId, userId])
+  @@index([userId])
+}
+
+/// One person who can sign in. Membership determines which private household
+/// data they may use; platformRole is only for operating the installation.
 model User {
-  id              String           @id @default(cuid())
+  id              String                @id @default(cuid())
   /// Lowercased at write time; the login identifier.
-  email           String           @unique
+  email           String                @unique
   /// Display name for greetings in email. Optional — email alone is enough.
   name            String?
   /// Scrypt hash (see src/lib/password.ts). Null between being invited and
   /// choosing a password, which is why invited members can't yet sign in.
   passwordHash    String?
   /// Weekly digest opt-in (§9b). One-click unsubscribe flips this to false.
-  newsletterOptIn Boolean          @default(true)
+  newsletterOptIn Boolean               @default(true)
+  platformRole    PlatformRole          @default(USER)
+  memberships     HouseholdMembership[]
   sessions        Session[]
   authTokens      AuthToken[]
   newsletters     NewsletterSend[]
   lastLoginAt     DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 }
 
 /// A signed-in browser. Server-side so signing out (or removing a member)
@@ -392,14 +454,19 @@ model AuthToken {
 /// One digest delivered to one member for one week. The unique constraint is
 /// the idempotency guard: a cron that fires twice can't send twice (§9b).
 model NewsletterSend {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String     @id @default(cuid())
+  /// Nullable while digest gathering is moved behind household context.
+  householdId String?
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// The Monday of the week the digest looks ahead to (date-only).
-  weekStart DateTime @db.Date
-  sentAt    DateTime @default(now())
+  weekStart   DateTime   @db.Date
+  sentAt      DateTime   @default(now())
 
   @@unique([userId, weekStart])
+  @@unique([householdId, userId, weekStart])
+  @@index([householdId])
   @@index([weekStart])
 }
 
@@ -462,13 +529,16 @@ model BackupRun {
 }
 
 // -----------------------------------------------------------------------------
-// Settings (§4, §9) — single household-wide row.
+// Settings (§4, §9) — one row per household after route scoping is complete.
 // -----------------------------------------------------------------------------
 
 model Settings {
-  /// Singleton row; always id = 1.
-  id            Int      @id @default(1)
+  id            Int        @id @default(autoincrement())
+  /// Nullable during the expand/backfill migration. Existing id=1 access
+  /// remains valid until settings routes switch to household context.
+  householdId   String?    @unique
+  household     Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
   /// Default servings every recipe scales to (§4).
-  householdSize Int      @default(2)
-  updatedAt     DateTime @updatedAt
+  householdSize Int        @default(2)
+  updatedAt     DateTime   @updatedAt
 }
