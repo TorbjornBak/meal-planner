@@ -58,15 +58,27 @@ export function BackupCard() {
   const [busy, setBusy] = useState<Action | null>(null);
   const [result, setResult] = useState<(Diagnosis & { ok?: boolean }) | null>(null);
   const [suggested, setSuggested] = useState<string | null>(null);
+  // The backup repository is one installation's worth of everyone's data, not
+  // any one household's, so /api/backup now answers 403 to a member who isn't
+  // the platform admin. That isn't a loading failure to retry or complain
+  // about — it just means this card has nothing to say to this person, the
+  // same way the household-invite form has nothing to say to a plain member.
+  const [forbidden, setForbidden] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/backup");
+    if (res.status === 403) {
+      setForbidden(true);
+      return;
+    }
     if (res.ok) setStatus(await res.json());
   }, []);
 
   useEffect(() => {
     load().catch(() => {});
   }, [load]);
+
+  if (forbidden) return null;
 
   async function act(action: Action) {
     setBusy(action);

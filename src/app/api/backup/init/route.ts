@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/currentUser";
+import { guardOperational } from "@/lib/opsGuard";
+import { recordAudit } from "@/lib/audit";
 import { BorgCommandError, initRepo } from "@/lib/borg";
 import { readBorgConfig } from "@/lib/borgConfig";
 import { describeBorgFailure } from "@/lib/borgError";
@@ -17,8 +18,8 @@ import { describeBorgFailure } from "@/lib/borgError";
  * enough to restore from any machine — see initArgs in borgConfig.ts.
  */
 export async function POST() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const guard = await guardOperational();
+  if (!guard.ok) return guard.response;
 
   const { config, missing } = readBorgConfig();
   if (missing.length > 0) {
@@ -31,6 +32,11 @@ export async function POST() {
 
   try {
     await initRepo(config);
+    await recordAudit({
+      action: "BACKUP_INITIALISED",
+      actor: guard.user ? { id: guard.user.id, email: guard.user.email } : null,
+      detail: `Created the backup repository at ${config.repo}.`,
+    });
     return NextResponse.json({
       ok: true,
       summary: "Created the repository. Nothing is in it yet — take the first backup below.",

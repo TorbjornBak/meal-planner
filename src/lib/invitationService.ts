@@ -115,6 +115,9 @@ export interface PendingInvitation {
   email: string;
   invitedName: string | null;
   kind: InvitationKind;
+  /// The name suggested for the household a PLATFORM invitation will create.
+  /// Always null for a household invitation, which joins one that exists.
+  householdName: string | null;
   invitedBy: string | null;
   expiresAt: Date;
   createdAt: Date;
@@ -143,6 +146,7 @@ export async function listPendingInvitations(
     email: row.email,
     invitedName: row.invitedName,
     kind: row.kind,
+    householdName: row.householdName,
     invitedBy: row.invitedBy ? (row.invitedBy.name ?? row.invitedBy.email) : null,
     expiresAt: row.expiresAt,
     createdAt: row.createdAt,

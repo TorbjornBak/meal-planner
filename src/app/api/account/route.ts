@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import type { PlatformRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext, currentUser } from "@/lib/currentUser";
 import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
@@ -16,7 +17,7 @@ import { isMailConfigured } from "@/lib/mail";
 
 /** The shape the Settings page reads. Never includes the password hash. */
 function publicAccount(
-  u: { id: string; email: string; name: string | null },
+  u: { id: string; email: string; name: string | null; platformRole: PlatformRole },
   household: { id: string; name: string; newsletterOptIn: boolean } | null,
 ) {
   return {
@@ -24,6 +25,10 @@ function publicAccount(
     email: u.email,
     name: u.name,
     household,
+    // So the settings screen can stop offering buttons that would 403. The
+    // authorization itself is the server's (§9c) — this only decides what is
+    // worth drawing, and hiding a control has never been a way to protect it.
+    isPlatformAdmin: u.platformRole === "ADMIN",
     // Kept at the top level as well: the settings card asks "does this
     // instance mail at all?" before it offers to send a preview.
     newsletterOptIn: household?.newsletterOptIn ?? false,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/currentUser";
+import { guardOperational } from "@/lib/opsGuard";
 import { backupStatus } from "@/lib/backups";
 
 /**
@@ -15,8 +15,12 @@ import { backupStatus } from "@/lib/backups";
  * Reaching the repository is POST /api/backup/check, which is a button.
  */
 export async function GET() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // Installation-wide, not the household's: the repository, the passphrase and
+  // the state of the box are one thing shared by every household on it, and a
+  // member of one kitchen has no business reading whether another's data
+  // reached a storage box.
+  const guard = await guardOperational();
+  if (!guard.ok) return guard.response;
 
   return NextResponse.json(await backupStatus());
 }
