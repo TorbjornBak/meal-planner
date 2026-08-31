@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { currentUser } from "@/lib/currentUser";
+import { currentHouseholdContext } from "@/lib/currentUser";
 import { INVITE_TTL_MS, issueAuthToken, looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { MailNotConfiguredError, appUrl, isMailConfigured, sendMail } from "@/lib/mail";
 import { inviteEmail } from "@/lib/emails";
@@ -10,40 +10,42 @@ import { describeMailError } from "@/lib/mailError";
 /**
  * Household members (§9).
  *
- * Every member is equal — there are no roles or admins. A household is a
- * handful of people who already share a kitchen; anyone who can sign in can
- * invite and remove, the same way anyone can edit the shopping list.
+ * The roster is private to the active household. Household administration is
+ * separate from installation-wide platform administration.
  */
 
 // GET /api/users — the household roster.
 export async function GET() {
-  const me = await currentUser();
-  if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const users = await prisma.user.findMany({
+  const memberships = await prisma.householdMembership.findMany({
+    where: { householdId: context.household.id },
     orderBy: { createdAt: "asc" },
     select: {
-      id: true,
-      email: true,
-      name: true,
-      newsletterOptIn: true,
-      passwordHash: true,
-      lastLoginAt: true,
+      role: true,
       createdAt: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          newsletterOptIn: true,
+          passwordHash: true,
+          lastLoginAt: true,
+        },
+      },
     },
   });
 
   return NextResponse.json(
-    users.map((u) => ({
-      id: u.id,
-      email: u.email,
-      name: u.name,
-      newsletterOptIn: u.newsletterOptIn,
-      // Never the hash itself — only whether they've finished signing up.
-      pending: u.passwordHash === null,
-      lastLoginAt: u.lastLoginAt,
-      createdAt: u.createdAt,
-      isMe: u.id === me.id,
+    memberships.map((membership) => ({
+      ...membership.user,
+      role: membership.role,
+      createdAt: membership.createdAt,
+      pending: membership.user.passwordHash === null,
+      passwordHash: undefined,
+      isMe: membership.user.id === context.user.id,
     })),
   );
 }
@@ -97,8 +99,11 @@ function inviteUrl(req: Request, token: string): string {
  * belongs and putting a live credential in a second place is pure risk.
  */
 export async function POST(req: Request) {
-  const me = await currentUser();
-  if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (context.role !== "ADMIN") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const parsed = Invite.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -111,15 +116,39 @@ export async function POST(req: Request) {
   }
 
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing?.passwordHash) {
+  const existingMembership = existing
+    ? await prisma.householdMembership.findUnique({
+        where: {
+          householdId_userId: {
+            householdId: context.household.id,
+            userId: existing.id,
+          },
+        },
+      })
+    : null;
+  if (existingMembership || existing?.passwordHash) {
     return NextResponse.json({ error: "already-a-member" }, { status: 409 });
   }
 
   const user =
-    existing ??
-    (await prisma.user.create({
-      data: { email, name: parsed.data.name?.trim() || null },
-    }));
+    existing
+      ? await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            memberships: {
+              create: { householdId: context.household.id, role: "ADMIN" },
+            },
+          },
+        })
+      : await prisma.user.create({
+          data: {
+            email,
+            name: parsed.data.name?.trim() || null,
+            memberships: {
+              create: { householdId: context.household.id, role: "ADMIN" },
+            },
+          },
+        });
 
   const token = await issueAuthToken(user.id, "INVITE", INVITE_TTL_MS);
 
@@ -141,7 +170,7 @@ export async function POST(req: Request) {
       const mail = inviteEmail({
         name: user.name,
         token,
-        invitedBy: me.name || me.email,
+        invitedBy: context.user.name || context.user.email,
       });
       await sendMail({ to: user.email, ...mail });
       return NextResponse.json({ user: member, delivered: true }, { status: 201 });
@@ -176,16 +205,29 @@ export async function POST(req: Request) {
  * with no users would fall back to open first-run setup (§9).
  */
 export async function DELETE(req: Request) {
-  const me = await currentUser();
-  if (!me) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (context.role !== "ADMIN") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "invalid" }, { status: 400 });
 
-  if ((await prisma.user.count()) <= 1) {
-    return NextResponse.json({ error: "last-member" }, { status: 409 });
+  const membership = await prisma.householdMembership.findUnique({
+    where: {
+      householdId_userId: { householdId: context.household.id, userId: id },
+    },
+  });
+  if (!membership) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (membership.role === "ADMIN") {
+    return NextResponse.json({ error: "protected-admin" }, { status: 409 });
   }
 
-  await prisma.user.delete({ where: { id } }).catch(() => {});
+  await prisma.householdMembership.delete({
+    where: {
+      householdId_userId: { householdId: context.household.id, userId: id },
+    },
+  });
   return NextResponse.json({ ok: true });
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 import { mondayOf } from "./week";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Weekly dinner plan (§3, §4). A night can hold several dinners; an empty night
 // simply has no slots.
@@ -16,13 +17,16 @@ import { mondayOf } from "./week";
 // dinner slots, ordered by day then position, and any night notes (§3, §9b).
 // Defaults to the current week.
 export async function GET(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   const raw = new URL(req.url).searchParams.get("weekStart");
   const weekStart = mondayOf(raw ? new Date(raw) : new Date());
 
   const plan = await prisma.weekPlan.upsert({
-    where: { weekStart },
+    where: { householdId_weekStart: { householdId, weekStart } },
     update: {},
-    create: { weekStart },
+    create: { householdId, weekStart },
     include: {
       slots: {
         orderBy: [{ dayOfWeek: "asc" }, { position: "asc" }],
@@ -53,17 +57,34 @@ const AddInput = z.object({
 // The calendar keeps showing a note next to the dinners instead, so a stale one
 // is something you can see and clear rather than something we guessed about.
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   const parsed = AddInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { weekPlanId, dayOfWeek, recipeId } = parsed.data;
 
+  const [plan, recipe] = await Promise.all([
+    prisma.weekPlan.findFirst({
+      where: { id: weekPlanId, householdId },
+      select: { id: true },
+    }),
+    prisma.recipe.findFirst({
+      where: { id: recipeId, householdId },
+      select: { id: true },
+    }),
+  ]);
+  if (!plan || !recipe) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
   const position = await prisma.dinnerSlot.count({
     where: { weekPlanId, dayOfWeek },
   });
   const slot = await prisma.dinnerSlot.create({
-    data: { weekPlanId, dayOfWeek, recipeId, position },
+    data: { householdId, weekPlanId, dayOfWeek, recipeId, position },
     include: { recipe: { omit: OMIT_RECIPE_BLOBS } },
   });
 
@@ -77,11 +98,19 @@ const PatchInput = z.object({
 
 // PATCH /api/plan — set (or clear) a dinner's per-slot servings override (§4).
 export async function PATCH(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const parsed = PatchInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { slotId, servingsOverride } = parsed.data;
+
+  const owned = await prisma.dinnerSlot.findFirst({
+    where: { id: slotId, weekPlan: { householdId: context.household.id } },
+    select: { id: true },
+  });
+  if (!owned) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const slot = await prisma.dinnerSlot.update({
     where: { id: slotId },
@@ -94,10 +123,17 @@ export async function PATCH(req: Request) {
 
 // DELETE /api/plan?slotId=... — remove a dinner from its night.
 export async function DELETE(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const slotId = new URL(req.url).searchParams.get("slotId");
   if (!slotId) {
     return NextResponse.json({ error: "slotId required" }, { status: 400 });
   }
+  const owned = await prisma.dinnerSlot.findFirst({
+    where: { id: slotId, weekPlan: { householdId: context.household.id } },
+    select: { id: true },
+  });
+  if (!owned) return NextResponse.json({ error: "not found" }, { status: 404 });
   await prisma.dinnerSlot.delete({ where: { id: slotId } });
   return NextResponse.json({ ok: true });
 }

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { extractRecipeImageUrl } from "@/lib/html";
 import { fetchImage, normalizeMime, resolvePublicUrl } from "@/lib/image";
 import { MAX_IMAGE_BYTES } from "@/lib/recipeImage";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // The recipe photo. Stored in the database like receipt photos (§7) so the app
 // stays self-contained: no image host to depend on, nothing to back up
@@ -13,9 +14,11 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  const recipe = await prisma.recipe.findUnique({
-    where: { id },
+  const recipe = await prisma.recipe.findFirst({
+    where: { id, householdId: context.household.id },
     select: { image: true, imageMime: true, imageUrl: true },
   });
 
@@ -51,9 +54,11 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  const recipe = await prisma.recipe.findUnique({
-    where: { id },
+  const recipe = await prisma.recipe.findFirst({
+    where: { id, householdId: context.household.id },
     select: { source: true, sourceHtml: true },
   });
   if (!recipe) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -91,7 +96,7 @@ export async function POST(
   }
 
   await prisma.recipe.update({
-    where: { id },
+    where: { id, householdId: context.household.id },
     // Prisma's Bytes field wants a plain Uint8Array; Buffer's ArrayBufferLike
     // backing store doesn't satisfy it under the current lib typings.
     data: { image: new Uint8Array(bytes), imageMime: mime, imageUrl },
@@ -106,9 +111,17 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
+  const recipe = await prisma.recipe.findFirst({
+    where: { id, householdId: context.household.id },
+    select: { id: true },
+  });
+  if (!recipe) return NextResponse.json({ error: "not found" }, { status: 404 });
+
   await prisma.recipe.update({
-    where: { id },
+    where: { id, householdId: context.household.id },
     data: { image: null, imageMime: null, imageUrl: null },
   });
   return NextResponse.json({ ok: true });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { scanReceipt } from "@/lib/ocr";
 import { findReceiptTotal } from "@/lib/receiptTotal";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Read the total off a receipt photo (§7). Local OCR on our own box — see
 // lib/ocr.ts — so this stays a suggestion the human confirms, never an
@@ -29,6 +30,8 @@ export interface ReceiptOcrResult {
  *   tripId  an already-logged trip, to re-read the receipt already stored.
  */
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   let form: FormData;
   try {
     form = await req.formData();
@@ -50,8 +53,11 @@ export async function POST(req: Request) {
     }
     bytes = Buffer.from(await photo.arrayBuffer());
   } else if (tripId) {
-    const receipt = await prisma.receipt.findUnique({
-      where: { tripId: String(tripId) },
+    const receipt = await prisma.receipt.findFirst({
+      where: {
+        tripId: String(tripId),
+        trip: { householdId: context.household.id },
+      },
     });
     if (!receipt) {
       return NextResponse.json({ error: "no receipt" }, { status: 404 });

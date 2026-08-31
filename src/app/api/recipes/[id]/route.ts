@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 import { RECIPE_KINDS } from "@/lib/recipeKind";
 import { RECIPE_CATEGORIES } from "@/lib/recipeCategory";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Rename, favorite, and delete for a single recipe (§2).
 
@@ -12,9 +13,11 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  const recipe = await prisma.recipe.findUnique({
-    where: { id },
+  const recipe = await prisma.recipe.findFirst({
+    where: { id, householdId: context.household.id },
     omit: OMIT_RECIPE_BLOBS,
     include: {
       ingredients: { orderBy: { position: "asc" } },
@@ -69,12 +72,20 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const parsed = PatchInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { ingredients, ...fields } = parsed.data;
+
+  const owned = await prisma.recipe.findFirst({
+    where: { id, householdId: context.household.id },
+    select: { id: true },
+  });
+  if (!owned) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const recipe = await prisma.$transaction(async (tx) => {
     await tx.recipe.update({ where: { id }, data: fields });
@@ -105,7 +116,14 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  await prisma.recipe.delete({ where: { id } });
+  const deleted = await prisma.recipe.deleteMany({
+    where: { id, householdId: context.household.id },
+  });
+  if (deleted.count === 0) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
   return NextResponse.json({ ok: true });
 }

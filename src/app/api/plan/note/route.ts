@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 /**
  * Marking a night as decided rather than merely empty (§3, §9b).
@@ -48,11 +49,19 @@ const NoteInput = z.object({
 
 // POST /api/plan/note — set (or change) a night's note.
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const parsed = NoteInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { weekPlanId, dayOfWeek, kind, text } = parsed.data;
+
+  const plan = await prisma.weekPlan.findFirst({
+    where: { id: weekPlanId, householdId: context.household.id },
+    select: { id: true },
+  });
+  if (!plan) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Upsert on the (weekPlanId, dayOfWeek) unique index: a night holds one
   // decision, so tapping "Eating out" on a night already marked "Leftovers" is
@@ -70,6 +79,8 @@ export async function POST(req: Request) {
 // DELETE /api/plan/note?weekPlanId=...&dayOfWeek=... — the night goes back to
 // undecided, which is what the digest counts.
 export async function DELETE(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const params = new URL(req.url).searchParams;
   const weekPlanId = params.get("weekPlanId");
   const dayOfWeek = Number(params.get("dayOfWeek"));
@@ -80,6 +91,12 @@ export async function DELETE(req: Request) {
       { status: 400 },
     );
   }
+
+  const plan = await prisma.weekPlan.findFirst({
+    where: { id: weekPlanId, householdId: context.household.id },
+    select: { id: true },
+  });
+  if (!plan) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // deleteMany, not delete: clearing a night that was already clear is the
   // outcome the caller asked for, not a 404 for the page to handle. (A double

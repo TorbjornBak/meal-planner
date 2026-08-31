@@ -38,11 +38,13 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((d) => {
         const origin = window.location.origin;
-        const code = `javascript:(function(){var t=${JSON.stringify(
+        const code = `javascript:(function(){var h=${JSON.stringify(
+          d.householdId,
+        )},t=${JSON.stringify(
           d.token,
         )},b=${JSON.stringify(
           origin,
-        )};fetch(b+'/api/capture',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({token:t,url:location.href,html:document.documentElement.outerHTML})}).then(function(r){return r.json()}).then(function(x){if(x&&x.id){if(confirm('Saved to MealPlanner. Open to review?'))location.href=b+'/recipes/'+x.id+'/edit'}else{alert('Capture failed: '+((x&&x.error)||'unknown'))}}).catch(function(e){alert('Capture failed: '+e)})})();`;
+        )};fetch(b+'/api/capture',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({householdId:h,token:t,url:location.href,html:document.documentElement.outerHTML})}).then(function(r){return r.json()}).then(function(x){if(x&&x.id){if(confirm('Saved to MealPlanner. Open to review?'))location.href=b+'/recipes/'+x.id+'/edit'}else{alert('Capture failed: '+((x&&x.error)||'unknown'))}}).catch(function(e){alert('Capture failed: '+e)})})();`;
         setBookmarklet(code);
       });
   }, []);

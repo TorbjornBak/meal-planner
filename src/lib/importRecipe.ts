@@ -17,6 +17,7 @@ import type { ParsedRecipe } from "./parse";
  * (the import route parses first to confirm there's a recipe before saving).
  */
 export async function createRecipeFromHtml(
+  householdId: string,
   html: string,
   pageUrl?: string | null,
   draft?: ParsedRecipe,
@@ -43,6 +44,7 @@ export async function createRecipeFromHtml(
 
   return prisma.recipe.create({
     data: {
+      householdId,
       name: parsed.name,
       source: pageUrl ?? parsed.source ?? null,
       instructions: parsed.instructions ?? null,

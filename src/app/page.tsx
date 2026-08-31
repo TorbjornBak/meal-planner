@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { weeklyBuckets } from "@/lib/spending";
 import { WeeklySpendChart } from "@/components/WeeklySpendChart";
 import { RecipeSuggestions } from "@/components/RecipeSuggestions";
+import { requireHouseholdContext } from "@/lib/currentUser";
 
 // Reads live data behind the shared-session gate — never statically rendered.
 export const dynamic = "force-dynamic";
@@ -12,9 +13,13 @@ function money(n: number): string {
 }
 
 export default async function DashboardPage() {
+  const { household } = await requireHouseholdContext();
   const [recipeCount, trips] = await Promise.all([
-    prisma.recipe.count(),
-    prisma.shoppingTrip.findMany({ orderBy: { date: "asc" } }),
+    prisma.recipe.count({ where: { householdId: household.id } }),
+    prisma.shoppingTrip.findMany({
+      where: { householdId: household.id },
+      orderBy: { date: "asc" },
+    }),
   ]);
 
   const rows = trips.map((t) => ({ date: t.date, total: Number(t.total) }));

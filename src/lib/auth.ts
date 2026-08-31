@@ -352,13 +352,16 @@ export async function redeemAuthToken(
  * from the session cookie so the cross-origin capture request can authenticate
  * without one. Derived from AUTH_SECRET, so it's stable and needs no storage.
  */
-export function captureToken(): Promise<string> {
-  return hmacHex("capture");
+export function captureToken(householdId: string): Promise<string> {
+  return hmacHex(`capture:${householdId}`);
 }
 
-export async function isValidCaptureToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
-  return safeEqual(token, await captureToken());
+export async function isValidCaptureToken(
+  householdId: string | undefined,
+  token: string | undefined,
+): Promise<boolean> {
+  if (!householdId || !token) return false;
+  return safeEqual(token, await captureToken(householdId));
 }
 
 /**

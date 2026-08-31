@@ -1,8 +1,8 @@
 // MealPlanner v1 data model — see DESIGN.md §"Data model sketch".
 //
 // Every plan, library and ledger belongs to a household. Accounts may belong to
-// several households through HouseholdMembership; request scoping will make
-// that ownership mandatory after this expand/backfill migration (§9).
+// several households through HouseholdMembership; every aggregate root carries
+// mandatory household ownership (§9).
 
 generator client {
   provider = "prisma-client-js"
@@ -74,9 +74,9 @@ enum RecipeCategory {
 /// Everything pasted-and-parsed is saved here and accumulates into the library.
 model Recipe {
   id                  String           @id @default(cuid())
-  /// Nullable while existing routes are moved behind household context.
-  householdId         String?
-  household           Household?       @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// The private household whose library contains this recipe.
+  householdId         String
+  household           Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
   name                String
   /// Dinner, side, drink or dessert (§2c). Defaults to DINNER so every recipe
   /// that existed before the sections did stays where its household left it.
@@ -127,6 +127,7 @@ model Recipe {
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
 
+  @@unique([id, householdId])
   @@index([isFavorite])
   @@index([kind])
   @@index([category])
@@ -159,11 +160,11 @@ model IngredientLine {
 /// (leftovers / eating out).
 model WeekPlan {
   id           String        @id @default(cuid())
-  /// Nullable while existing routes are moved behind household context.
-  householdId  String?
-  household    Household?    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// The private household whose calendar contains this week.
+  householdId  String
+  household    Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
   /// The Monday of the week (date-only), unique per household.
-  weekStart    DateTime      @unique @db.Date
+  weekStart    DateTime      @db.Date
   slots        DinnerSlot[]
   /// The nights that were decided *not* to need a dinner (§3, §9b).
   nightNotes   NightNote[]
@@ -171,9 +172,8 @@ model WeekPlan {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  /// Kept alongside the legacy global constraint until all callers scope by
-  /// household, at which point the global constraint can safely be removed.
   @@unique([householdId, weekStart])
+  @@unique([id, householdId])
   @@index([householdId])
 }
 
@@ -181,20 +181,23 @@ model WeekPlan {
 /// night simply has no slots. Removing a recipe from the library removes it
 /// from every night it was on (cascade).
 model DinnerSlot {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
+  householdId      String
+  household        Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   weekPlanId       String
-  weekPlan         WeekPlan @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
+  weekPlan         WeekPlan  @relation(fields: [weekPlanId, householdId], references: [id, householdId], onDelete: Cascade)
   /// 0 = Monday … 6 = Sunday.
   dayOfWeek        Int
   recipeId         String
-  recipe           Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  recipe           Recipe    @relation(fields: [recipeId, householdId], references: [id, householdId], onDelete: Cascade)
   /// Per-dinner override of household size for guests / batch-cooking (§4).
   servingsOverride Int?
   /// Orders the dinners within a single night.
-  position         Int      @default(0)
+  position         Int       @default(0)
 
   @@index([weekPlanId, dayOfWeek])
   @@index([recipeId])
+  @@index([householdId])
 }
 
 /// Why a night has no dinner on it (§3).
@@ -295,13 +298,13 @@ model ShoppingListItem {
 /// The household's "things we always have" list. Matched by name against the
 /// shopping list to move items into the pantry section (§5).
 model PantryItem {
-  id          String     @id @default(cuid())
-  householdId String?
-  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   name        String
   /// Normalized key matched against ShoppingListItem.ingredientKey.
-  nameKey     String     @unique
-  createdAt   DateTime   @default(now())
+  nameKey     String
+  createdAt   DateTime  @default(now())
 
   @@unique([householdId, nameKey])
   @@index([householdId])
@@ -314,15 +317,15 @@ model PantryItem {
 /// One grocery trip. Loosely coupled to the shopping list — no item-level
 /// cost attribution (§7).
 model ShoppingTrip {
-  id          String     @id @default(cuid())
-  householdId String?
-  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  date        DateTime   @db.Date
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  date        DateTime  @db.Date
   store       String
   /// The typed-in receipt total.
-  total       Decimal    @db.Money
+  total       Decimal   @db.Money
   receipt     Receipt?
-  createdAt   DateTime   @default(now())
+  createdAt   DateTime  @default(now())
 
   @@index([date])
   @@index([householdId])
@@ -361,6 +364,7 @@ model Household {
   weekPlans   WeekPlan[]
   pantryItems PantryItem[]
   trips       ShoppingTrip[]
+  dinnerSlots DinnerSlot[]
   settings    Settings?
   newsletters NewsletterSend[]
   createdAt   DateTime              @default(now())
@@ -460,17 +464,17 @@ model AuthToken {
 /// One digest delivered to one member for one week. The unique constraint is
 /// the idempotency guard: a cron that fires twice can't send twice (§9b).
 model NewsletterSend {
-  id          String     @id @default(cuid())
-  /// Nullable while digest gathering is moved behind household context.
-  householdId String?
-  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  /// Delivery identity includes household because one user may receive a
+  /// separate digest for each household they belong to.
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   userId      String
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// The Monday of the week the digest looks ahead to (date-only).
-  weekStart   DateTime   @db.Date
-  sentAt      DateTime   @default(now())
+  weekStart   DateTime  @db.Date
+  sentAt      DateTime  @default(now())
 
-  @@unique([userId, weekStart])
   @@unique([householdId, userId, weekStart])
   @@index([householdId])
   @@index([weekStart])
@@ -539,12 +543,11 @@ model BackupRun {
 // -----------------------------------------------------------------------------
 
 model Settings {
-  id            Int        @id @default(autoincrement())
-  /// Nullable during the expand/backfill migration. Existing id=1 access
-  /// remains valid until settings routes switch to household context.
-  householdId   String?    @unique
-  household     Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  id            Int       @id @default(autoincrement())
+  /// Exactly one settings row per household.
+  householdId   String    @unique
+  household     Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   /// Default servings every recipe scales to (§4).
-  householdSize Int        @default(2)
-  updatedAt     DateTime   @updatedAt
+  householdSize Int       @default(2)
+  updatedAt     DateTime  @updatedAt
 }

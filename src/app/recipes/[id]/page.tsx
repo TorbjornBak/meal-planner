@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS, recipeImageSrc } from "@/lib/recipeImage";
 import { yieldNoun } from "@/lib/recipeKind";
 import { categoryHint, categoryLabel } from "@/lib/recipeCategory";
+import { requireHouseholdContext } from "@/lib/currentUser";
 import { CookingMode } from "./CookingMode";
 import { Method } from "./Method";
 
@@ -52,9 +53,10 @@ export default async function RecipeDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const { household } = await requireHouseholdContext();
   const { id } = await params;
-  const recipe = await prisma.recipe.findUnique({
-    where: { id },
+  const recipe = await prisma.recipe.findFirst({
+    where: { id, householdId: household.id },
     // The photo is fetched by the browser from its own endpoint; no need to
     // drag its bytes (or the captured page HTML) through the render.
     omit: OMIT_RECIPE_BLOBS,

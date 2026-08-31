@@ -19,7 +19,12 @@ async function main() {
 
   for (const name of ["Salt", "Olive oil", "Black pepper"]) {
     await prisma.pantryItem.upsert({
-      where: { nameKey: name.toLowerCase() },
+      where: {
+        householdId_nameKey: {
+          householdId: INITIAL_HOUSEHOLD_ID,
+          nameKey: name.toLowerCase(),
+        },
+      },
       update: {},
       create: {
         householdId: INITIAL_HOUSEHOLD_ID,
