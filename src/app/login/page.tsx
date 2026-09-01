@@ -4,8 +4,11 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
-// Sign in (§9). Accounts gate entry; they don't partition data — everyone who
-// signs in sees the same plan, library and ledger.
+import { safeNextPath } from "@/lib/safeRedirect";
+
+// Sign in (§9). An account gates entry and, since the multi-household work,
+// also decides what there is to see: the session carries an active household
+// and every query is scoped to it.
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
@@ -32,10 +35,11 @@ function LoginForm() {
         setError("That email and password don't match.");
         return;
       }
-      // Only follow a relative path, so a crafted ?next= can't bounce someone
-      // straight off the tailnet to somewhere else.
-      const next = params.get("next");
-      router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : "/");
+      // Only follow a same-origin path, so a crafted ?next= can't bounce
+      // someone straight off the tailnet to somewhere else. The check lives in
+      // safeNextPath because "starts with / but not //" is not enough: a
+      // browser reads `/\evil.com` as another origin entirely.
+      router.push(safeNextPath(params.get("next"), window.location.origin));
       router.refresh();
     } finally {
       setBusy(false);

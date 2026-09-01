@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { guardOperational } from "@/lib/opsGuard";
 import { recordAudit } from "@/lib/audit";
 import { removalInterventionRefusal, roleInterventionRefusal } from "@/lib/platformAdmin";
+import { rotateCaptureKey } from "@/lib/auth";
 
 /**
  * Reaching into one household's membership (§9c).
@@ -29,6 +30,27 @@ async function loadHousehold(id: string) {
   });
 }
 
+type Household = NonNullable<Awaited<ReturnType<typeof loadHousehold>>>;
+
+/** The membership row for `userId` in `household`, if they're a member. */
+function findMembership(household: Household, userId: string) {
+  return household.memberships.find((m) => m.userId === userId) ?? null;
+}
+
+/**
+ * The email to name in an audit sentence and, where the action calls for it,
+ * in `subjectEmail` — both handlers below load the household's own
+ * membership rows, which carry a `userId` but not an email, and need one
+ * more query for a sentence a person can read.
+ */
+async function subjectEmailFor(userId: string): Promise<string | null> {
+  const subject = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+  return subject?.email ?? null;
+}
+
 const Patch = z.object({
   userId: z.string().min(1).max(60),
   role: z.enum(["MEMBER", "ADMIN"]),
@@ -38,6 +60,11 @@ const Patch = z.object({
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const guard = await guardOperational();
   if (!guard.ok) return guard.response;
+  // guardOperational() is called here with no { bearer: true }, so guard.ok
+  // can only be true with a non-null user — operationalCaller only allows a
+  // null user through in bearer mode. Kept anyway, in the style of the guards
+  // around it, so this doesn't quietly start relying on that invariant if
+  // this handler is ever changed to accept a bearer-authenticated caller too.
   const actor = guard.user;
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
@@ -48,7 +75,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const household = await loadHousehold(id);
   if (!household) return NextResponse.json({ error: "not-found" }, { status: 404 });
 
-  const target = household.memberships.find((m) => m.userId === parsed.data.userId) ?? null;
+  const target = findMembership(household, parsed.data.userId);
   const refusal = roleInterventionRefusal({
     caller: { platformRole: actor.platformRole },
     target: target ? { role: target.role } : null,
@@ -67,10 +94,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ ok: true, unchanged: true });
   }
 
-  const subject = await prisma.user.findUnique({
-    where: { id: parsed.data.userId },
-    select: { email: true },
-  });
+  const subjectEmail = await subjectEmailFor(parsed.data.userId);
 
   await prisma.householdMembership.update({
     where: { householdId_userId: { householdId: id, userId: parsed.data.userId } },
@@ -81,8 +105,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     action: "HOUSEHOLD_ROLE_CHANGED",
     actor: { id: actor.id, email: actor.email },
     household: { id: household.id, name: household.name },
-    subjectEmail: subject?.email ?? null,
-    detail: `Made ${subject?.email ?? parsed.data.userId} ${
+    subjectEmail,
+    detail: `Made ${subjectEmail ?? parsed.data.userId} ${
       parsed.data.role === "ADMIN" ? "an admin of" : "an ordinary member of"
     } ${household.name}.`,
   });
@@ -101,6 +125,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const guard = await guardOperational();
   if (!guard.ok) return guard.response;
+  // guardOperational() is called here with no { bearer: true }, so guard.ok
+  // can only be true with a non-null user — operationalCaller only allows a
+  // null user through in bearer mode. Kept anyway, in the style of the guards
+  // around it, so this doesn't quietly start relying on that invariant if
+  // this handler is ever changed to accept a bearer-authenticated caller too.
   const actor = guard.user;
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
@@ -111,7 +140,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   const household = await loadHousehold(id);
   if (!household) return NextResponse.json({ error: "not-found" }, { status: 404 });
 
-  const target = household.memberships.find((m) => m.userId === userId) ?? null;
+  const target = findMembership(household, userId);
   const refusal = removalInterventionRefusal({
     caller: { platformRole: actor.platformRole },
     target: target ? { role: target.role } : null,
@@ -122,21 +151,25 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
   }
   if (refusal) return NextResponse.json({ error: refusal }, { status: 404 });
 
-  const subject = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { email: true },
-  });
+  const subjectEmail = await subjectEmailFor(userId);
 
-  await prisma.householdMembership.delete({
-    where: { householdId_userId: { householdId: id, userId } },
+  // Same reasoning as the household's own removal route (§1): rotate the
+  // bookmarklet capture key in the same transaction as the delete, so a
+  // platform admin reaching in from outside revokes the old token as
+  // atomically as an admin acting from inside the household does.
+  await prisma.$transaction(async (tx) => {
+    await tx.householdMembership.delete({
+      where: { householdId_userId: { householdId: id, userId } },
+    });
+    await rotateCaptureKey(id, tx);
   });
 
   await recordAudit({
     action: "HOUSEHOLD_MEMBER_REMOVED",
     actor: { id: actor.id, email: actor.email },
     household: { id: household.id, name: household.name },
-    subjectEmail: subject?.email ?? null,
-    detail: `Removed ${subject?.email ?? userId} from ${household.name}${
+    subjectEmail,
+    detail: `Removed ${subjectEmail ?? userId} from ${household.name}${
       target?.role === "ADMIN" ? ", who was an admin of it" : ""
     }.`,
   });

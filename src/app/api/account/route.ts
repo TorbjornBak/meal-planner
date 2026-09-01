@@ -4,7 +4,11 @@ import type { PlatformRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext, currentUser } from "@/lib/currentUser";
 import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
-import { isMailConfigured } from "@/lib/mail";
+import { verifyPassword } from "@/lib/password";
+import { isMailConfigured, sendMail } from "@/lib/mail";
+import { emailChangedEmail } from "@/lib/emails";
+import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 
 /**
  * Your own account (§9), and your digest preference *here* (§9b).
@@ -67,6 +71,11 @@ export async function GET() {
 const Patch = z.object({
   name: z.string().max(120).nullish(),
   email: z.string().max(320).optional(),
+  /**
+   * Only required, and only checked, when `email` is actually changing (see
+   * below) — saving your display name must not start demanding a password.
+   */
+  currentPassword: z.string().min(1).max(200).optional(),
   /** Applies to the active household's membership, not the account. */
   newsletterOptIn: z.boolean().optional(),
 });
@@ -82,6 +91,10 @@ export async function PATCH(req: Request) {
   }
 
   const data: { name?: string | null; email?: string } = {};
+  // Set only when the address is actually about to change, so the mail and
+  // the audit row below fire on a real change and not on a PATCH that merely
+  // resubmitted the account's current address.
+  let previousEmail: string | null = null;
 
   if (parsed.data.name !== undefined) {
     const name = parsed.data.name?.trim();
@@ -94,9 +107,32 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "invalid-email" }, { status: 400 });
     }
     if (email !== user.email) {
+      // The login address is what /api/password/forgot mails a reset link
+      // to, so changing it with nothing but a cookie in hand is a full
+      // account takeover: change the address, then use the forgot-password
+      // flow to lock the real owner out of their own recovery path. Gated
+      // exactly the way src/app/api/account/password/route.ts gates a
+      // password change, and for the same reason — it's what stops a
+      // borrowed or stolen session from doing this unattended.
+      //
+      // Same bucket as the password change, not a bucket of its own: both
+      // are "grind the current password out of this field" attempts against
+      // the same account, and rateLimitPolicy.ts's LIMITS table isn't ours to
+      // extend here.
+      const refusal = await consumeAll([["password-change:user", user.id]]);
+      if (refusal) return tooManyRequests(refusal);
+
+      if (!parsed.data.currentPassword) {
+        return NextResponse.json({ error: "password-required" }, { status: 401 });
+      }
+      if (!(await verifyPassword(parsed.data.currentPassword, user.passwordHash))) {
+        return NextResponse.json({ error: "wrong-password" }, { status: 401 });
+      }
+
       const taken = await prisma.user.findUnique({ where: { email } });
       if (taken) return NextResponse.json({ error: "email-taken" }, { status: 409 });
       data.email = email;
+      previousEmail = user.email;
     }
   }
 
@@ -114,5 +150,35 @@ export async function PATCH(req: Request) {
   }
 
   const updated = await prisma.user.update({ where: { id: user.id }, data });
+
+  if (previousEmail) {
+    // What an account takeover looks like from the outside starts here, the
+    // same way it does for a password change: the row says the address
+    // changed and what it changed from, which is the fact worth checking
+    // first if the old address later reports being locked out.
+    await recordAudit({
+      action: "EMAIL_CHANGED",
+      actor: { id: user.id, email: previousEmail },
+      detail: `${previousEmail} changed their login address to ${updated.email}.`,
+    });
+
+    // Mail is optional on this installation (isMailConfigured) — the address
+    // has already changed by this point regardless, so a missing SMTP config
+    // degrades this to "no notice sent" rather than failing the request. The
+    // notice goes to the OLD address on purpose: it's the one mailbox that is
+    // guaranteed to belong to whoever owned the account before this request,
+    // and the only place left to say "if this wasn't you" to.
+    if (isMailConfigured()) {
+      try {
+        await sendMail({
+          to: previousEmail,
+          ...emailChangedEmail({ name: updated.name, newEmail: updated.email }),
+        });
+      } catch (err) {
+        console.error("email change notice failed", err);
+      }
+    }
+  }
+
   return NextResponse.json(publicAccount(updated, await activeHousehold()));
 }

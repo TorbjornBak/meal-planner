@@ -359,6 +359,17 @@ enum HouseholdRole {
 model Household {
   id          String                @id @default(cuid())
   name        String
+  /// Salt mixed into the bookmarklet capture token's HMAC
+  /// (src/lib/auth.ts captureToken), alongside AUTH_SECRET (§1). Not a secret
+  /// standing on its own — Prisma cannot generate an arbitrary random default,
+  /// and `cuid()` is unpredictable enough for a value whose only job is to sit
+  /// inside a keyed HMAC that still needs AUTH_SECRET to forge. What matters is
+  /// that it can be rotated on its own: removing a member, or a platform
+  /// admin's membership intervention, rewrites this to a fresh value, which
+  /// invalidates every capture token issued for this household without
+  /// touching AUTH_SECRET — rotating that would sign every account on the
+  /// installation out to revoke one household's bookmarklet.
+  captureKey  String                @default(cuid())
   memberships HouseholdMembership[]
   invitations Invitation[]
   auditEvents AuditEvent[]
@@ -666,6 +677,13 @@ enum AuditAction {
   PASSWORD_CHANGED
   PASSWORD_RESET_REQUESTED
   PASSWORD_RESET_COMPLETED
+  /// The login address itself changed. Distinct from PASSWORD_CHANGED even
+  /// though both are gated the same way (current password required): a
+  /// changed address is also what /api/password/forgot mails to next time,
+  /// so it is the more consequential of the two credential changes and the
+  /// one whose row should say, on its own, what the account's address was
+  /// before someone should go looking for it.
+  EMAIL_CHANGED
   /// A rate limit refused somebody. Not one row per failed password — that
   /// would be a table of noise — but one when the limiter actually starts
   /// turning attempts away, which is the point at which somebody should look.

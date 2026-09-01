@@ -8,6 +8,7 @@ import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
 import { describeMailError } from "@/lib/mailError";
 import {
+  acceptanceWouldRequireSignIn,
   invitationUrl,
   issueInvitation,
   listPendingInvitations,
@@ -114,11 +115,24 @@ export async function POST(req: Request) {
     );
   }
 
+  // A platform invitation has no household at issue time, so `alreadyMember`
+  // is always false here — there is nothing yet for the address to already
+  // belong to. What still needs checking is whether an account already
+  // exists at the address at all: if one does, the bare link is a way to
+  // sign in as it, not a way to introduce yourself, and it must not be
+  // handed to the inviter as a fallback for undelivered mail. See
+  // acceptanceWouldRequireSignIn in src/lib/invitationService.ts.
+  const unsafeToShare =
+    !delivered && (await acceptanceWouldRequireSignIn({ email, alreadyMember: false }));
+
   return NextResponse.json(
     {
       invitation: pending,
       delivered,
-      ...(delivered ? {} : { inviteUrl: invitationUrl(token, new URL(req.url).origin) }),
+      ...(delivered || unsafeToShare
+        ? {}
+        : { inviteUrl: invitationUrl(token, new URL(req.url).origin) }),
+      ...(unsafeToShare ? { linkWithheld: true } : {}),
     },
     { status: 201 },
   );

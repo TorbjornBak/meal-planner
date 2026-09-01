@@ -129,6 +129,45 @@ ${button(link, "Set up your household")}
   return { subject, text, html };
 }
 
+/**
+ * Sent to the OLD address after a login-address change, not the new one — the
+ * new address hasn't proven it belongs to the account holder yet, so the one
+ * mailbox this can usefully warn is the one that's about to lose the ability
+ * to sign in (§9).
+ *
+ * Deliberately does *not* point at /forgot the way passwordChangedEmail
+ * points a locked-out reader at it. A password reset now mails whoever holds
+ * ${newEmail}, which is exactly the mailbox this notice exists to warn about
+ * if the change wasn't legitimate — sending the real owner to a link that
+ * hands the *attacker* a password reset would turn a warning into a second
+ * step of the same takeover. There is no self-service recovery from here:
+ * the honest thing to say is who can actually still act on the account from
+ * the outside.
+ */
+export function emailChangedEmail(opts: { name: string | null; newEmail: string }): Composed {
+  const hello = opts.name ? `Hi ${opts.name},` : "Hi,";
+
+  const text = `${hello}
+
+The login address on your MealPlanner account was just changed to
+${opts.newEmail}. This mailbox will no longer sign in to that account, and a
+password reset will now go to ${opts.newEmail} instead of here.
+
+If that wasn't you, this address can't get the account back on its own —
+ask another admin of your household, or whoever administers this
+installation, to look at the account.`;
+
+  const html = layout({
+    title: "Your MealPlanner login address changed",
+    preheader: `Your account's login address was changed to ${opts.newEmail}.`,
+    body: `<p style="margin:0 0 12px 0;">${esc(hello)}</p>
+<p style="margin:0 0 12px 0;">The login address on your MealPlanner account was just changed to <strong>${esc(opts.newEmail)}</strong>. This mailbox will no longer sign in to that account, and a password reset will now go to ${esc(opts.newEmail)} instead of here.</p>
+<p style="margin:0;color:${PALETTE.muted};font-size:14px;">If that wasn't you, this address can't get the account back on its own — ask another admin of your household, or whoever administers this installation, to look at the account.</p>`,
+  });
+
+  return { subject: "Your MealPlanner login address changed", text, html };
+}
+
 /** Confirmation that a password actually changed, sent after the fact. */
 export function passwordChangedEmail(opts: { name: string | null }): Composed {
   const hello = opts.name ? `Hi ${opts.name},` : "Hi,";

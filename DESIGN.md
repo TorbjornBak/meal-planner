@@ -266,6 +266,18 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   out — or removing a member — takes effect on the very next request instead of
   whenever a cookie happens to lapse. The cookie holds a random token; only its
   hash is stored, so a database dump doesn't hand over live sessions.
+- **The bookmarklet's capture token is the one credential that isn't a session**
+  — the capture request is cross-origin and arrives without a cookie, so it
+  carries a token derived per household instead. That token used to be a pure
+  function of `AUTH_SECRET` and the household id, which made it unrevocable:
+  somebody removed from a household kept a working write credential for it for
+  ever, and the only remedy was rotating `AUTH_SECRET` and signing out the whole
+  installation. The household now stores a `captureKey` that is mixed into the
+  derivation and **rotated whenever anybody loses access**, in the same
+  transaction that deletes the membership. Rotation invalidates the bookmarklet
+  for everyone still in the household, which is the right trade: a shared
+  credential cannot be revoked for one holder, and a stale bookmarklet is an
+  annoyance where a live one held by somebody who was removed is not.
 - **Getting in when you can't:**
   - **Forgot password** emails a single-use link, good for one hour. Requesting
     one always reports the same thing whether or not the address is registered —
@@ -275,6 +287,13 @@ list → tick it off in the store → log what you paid → watch weekly spend.
     first one, and closes it permanently once an account exists.
   - Resetting a password **signs out every device**, since a reset is the remedy
     for a stolen session as much as a forgotten password.
+  - **Changing the login address asks for the current password**, and tells the
+    old address it happened. The address is what `forgot password` mails, so a
+    session that can silently move it is a session that can take the account
+    permanently — change the address, then use the ordinary recovery flow and
+    lock the real owner out of their own. The notice deliberately does not
+    advise a password reset the way the password-changed notice does: once the
+    address has moved, a reset would be mailed to whoever moved it.
 - **Invitations are the only way in**, and they are records rather than
   side effects. There is no open sign-up.
   - An invitation is a **hashed token, bound to one normalized address,
@@ -292,10 +311,22 @@ list → tick it off in the store → log what you paid → watch weekly spend.
     of its admins, and is a household admin's to send. A **platform invitation**
     creates a *new* household with the invitee as its first admin, and is the
     platform admin's — it is the thing that grows the installation.
-  - An address that **already has an account accepts without touching its
-    password**: opening the link proves the same thing a reset link proves, and
-    asking somebody to reset a working password in order to join a second
-    kitchen teaches them that a mailed link means "type your password".
+  - An address that **already has an account signs in to accept**, and its
+    password is still never touched. The rule here used to be that opening the
+    link proved what a reset link proves. That reasoning was wrong in two
+    places: a reset link only ever goes to the mailbox, whereas an invitation
+    link is *also* handed back to the inviter when the box has no SMTP relay,
+    and a reset ends by replacing the password rather than by handing over a
+    session. So accepting anonymously let anyone who could issue an invitation
+    mint a session for any address that already had an account — a household
+    admin could take over a platform admin by inviting them. Both plans that
+    resolve to an existing account now require a session for that same address
+    (`sign-in-required`); only the plan that creates the account accepts from a
+    signed-out browser, because there is no account there yet for a session to
+    prove control of. What has *not* come back is asking an existing user for a
+    new password: making somebody reset a working password in order to join a
+    second kitchen is how you teach them that a mailed link means "type your
+    password".
   - **Admins are equals**: a household admin may remove a member, but not
     remove or demote another admin. Two people who share a kitchen and have
     fallen out should end up talking, not racing to click first.

@@ -8,6 +8,7 @@ import { recordAudit } from "@/lib/audit";
 import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
 import {
+  acceptanceWouldRequireSignIn,
   invitationUrl,
   isAlreadyMember,
   issueInvitation,
@@ -51,7 +52,13 @@ const Invite = z.object({
  * Answers 201 with `{ invitation, delivered, inviteUrl? }`. `inviteUrl` appears
  * only when there was no mail server to send it with: when the mail did go out
  * the link is already where it belongs, and putting a live credential in a
- * second place is pure risk.
+ * second place is pure risk. It is withheld even then — `linkWithheld: true`
+ * instead — when the address already has an account: for that address the
+ * link is not a way to introduce yourself, it is a way to sign in as
+ * somebody else's existing account with no password required, and handing
+ * it to a third party (the inviter) is exactly the bearer-token mistake
+ * acceptInvitation's `sign-in-required` check exists to close off. See
+ * acceptanceWouldRequireSignIn in src/lib/invitationService.ts.
  */
 export async function POST(req: Request) {
   const context = await currentHouseholdContext();
@@ -136,13 +143,20 @@ export async function POST(req: Request) {
     );
   }
 
+  // `alreadyMember: false` is a known fact here, not an assumption: the check
+  // at the top of this handler has already refused to issue an invitation to
+  // an address already on this household's roster.
+  const unsafeToShare =
+    !delivered && (await acceptanceWouldRequireSignIn({ email, alreadyMember: false }));
+
   return NextResponse.json(
     {
       invitation: pending,
       delivered,
-      ...(delivered
+      ...(delivered || unsafeToShare
         ? {}
         : { inviteUrl: invitationUrl(token, new URL(req.url).origin) }),
+      ...(unsafeToShare ? { linkWithheld: true } : {}),
     },
     { status: 201 },
   );

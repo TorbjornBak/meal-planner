@@ -18,8 +18,8 @@ import { lookup } from "node:dns/promises";
 import * as http from "node:http";
 import * as https from "node:https";
 import { Readable } from "node:stream";
-import { classifyAddress } from "./privateNetwork";
-import { MAX_IMAGE_BYTES } from "./recipeImage";
+import { classifyAddress } from "./privateNetwork.ts";
+import { MAX_IMAGE_BYTES } from "./recipeImage.ts";
 
 /** Formats a browser will render inline without a plugin or conversion. */
 const ALLOWED_MIME = new Set([
@@ -282,6 +282,55 @@ export function normalizeMime(header: string | null): string | null {
 }
 
 /**
+ * Read a response body in chunks, bailing the moment the running total
+ * exceeds `maxBytes` — the size cap that used to live only in the check
+ * *after* `res.arrayBuffer()`/`res.text()` had already finished buffering the
+ * whole thing. `Content-Length` is a declaration, not a fact: a host that
+ * omits it, or lies and sends more than it claimed, used to cost this server
+ * an unbounded allocation before that check ever ran, which from a box about
+ * to face the open internet is a one-request memory-exhaustion DoS handed to
+ * anyone who can get a URL pasted into a recipe. Reading the stream ourselves
+ * means the cap bounds what is actually allocated, not what a hostile host
+ * merely reported.
+ *
+ * Shared by `fetchImage` here and `fetchPageHtml` in `fetchPage.ts`, which
+ * used to each buffer-then-check the same way — one read-with-a-cap loop
+ * beats two copies that could quietly drift apart.
+ *
+ * Returns null for "too big," the same as for every other kind of failure
+ * this module reports, rather than throwing: every caller already treats a
+ * null result as "give up on this fetch," so a second error channel just for
+ * this one reason would be a distinction none of them use. The underlying
+ * stream is cancelled before returning, so the connection doesn't sit there
+ * draining bytes nobody wants.
+ */
+export async function readCapped(res: Response, maxBytes: number): Promise<Buffer | null> {
+  const body = res.body;
+  if (!body) return Buffer.alloc(0);
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total);
+}
+
+/**
  * Download an image, or return null if anything at all goes wrong — a dead
  * link, a redirect to an HTML error page, an oversized file, a slow host, a
  * URL the private-network guard refuses. Every caller treats the photo as
@@ -302,13 +351,15 @@ export async function fetchImage(url: string): Promise<FetchedImage | null> {
     const mime = normalizeMime(res.headers.get("content-type"));
     if (!mime) return null;
 
-    // Trust the declared length when it's there, but re-check after reading —
-    // a wrong or absent Content-Length must not get us a 200 MB buffer.
+    // Trust the declared length when it's there — it saves reading anything
+    // at all for the common case of an honestly-labelled oversized file — but
+    // `readCapped` is what actually enforces the limit, because a wrong or
+    // absent Content-Length must not get us a 200 MB buffer.
     const declared = Number(res.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) return null;
 
-    const bytes = Buffer.from(await res.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return null;
+    const bytes = await readCapped(res, MAX_IMAGE_BYTES);
+    if (!bytes || bytes.byteLength === 0) return null;
 
     return { bytes, mime };
   } catch {

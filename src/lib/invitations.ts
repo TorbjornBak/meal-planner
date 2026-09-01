@@ -49,31 +49,54 @@ export function invitationState(inv: InvitationFacts, now: Date = new Date()): I
 }
 
 /** Why an invitation cannot be accepted, or null when it can. */
-export type AcceptanceRefusal = "revoked" | "accepted" | "expired" | "email-mismatch";
+export type AcceptanceRefusal =
+  | "revoked"
+  | "accepted"
+  | "expired"
+  | "email-mismatch"
+  | "sign-in-required";
 
 /**
- * Whether this person, presenting this address, may spend this link.
+ * Whether this visitor, in this session state, may spend this link.
  *
- * The email check is what makes an invitation a credential for one mailbox
- * rather than a bearer token for whoever the link reaches. A forwarded link —
- * or one lifted from a mail archive by somebody who then signs up under their
- * own address — gets `email-mismatch` and nothing else. Note what is *not*
- * checked: whether an account already exists at that address. That is a
- * separate question with its own answer (see AcceptancePlan), and conflating
- * the two is how an existing user ends up being asked for a new password.
+ * `signedInEmail` is the visitor's own session address, already normalized,
+ * or null when they have no session at all — never defaulted to the
+ * invitation's own address by a caller trying to make an anonymous visitor
+ * "pass" the check. Doing that once, silently, is the difference between an
+ * invitation that proves control of a mailbox and one that IS a bearer
+ * credential for whoever holds the link; see acceptInvitation's own comment
+ * on `sign-in-required` for the account-takeover that gap used to open.
  *
- * `presentedEmail` must already be normalized; normalizeEmail in src/lib/auth.ts
- * is the one place that decides what normalization means.
+ * Two checks, in order:
+ *
+ * - A signed-in visitor at a different address never gets past a live
+ *   invitation, whatever it would resolve to: `email-mismatch`. A forwarded
+ *   link, or one lifted from a mail archive by somebody who then opens it
+ *   signed in as themselves, gets this and nothing else.
+ * - A visitor with no session at all is let through only when `plan` is
+ *   `create-account` — nobody holds the address yet, so there is no existing
+ *   account for a session to prove control of, and the token really is the
+ *   only credential there is meant to be. For `link-account` and
+ *   `already-a-member`, an account already exists at the address, and
+ *   `sign-in-required` is what stands between an anonymous caller and
+ *   minting a session for it.
+ *
+ * Note what is *not* checked here: whether the invitation's address is worth
+ * asking for a password. That is `needsPassword`'s job, on the plan alone —
+ * conflating the two is how an existing user ends up being asked for a new
+ * one.
  */
 export function acceptanceRefusal(
   inv: InvitationFacts,
-  presentedEmail: string,
+  opts: { signedInEmail: string | null; plan: AcceptancePlan },
   now: Date = new Date(),
 ): AcceptanceRefusal | null {
   const state = invitationState(inv, now);
   if (state !== "live") return state;
-  if (presentedEmail !== inv.email) return "email-mismatch";
-  return null;
+  if (opts.signedInEmail !== null) {
+    return opts.signedInEmail === inv.email ? null : "email-mismatch";
+  }
+  return planRequiresSignIn(opts.plan) ? "sign-in-required" : null;
 }
 
 /**
@@ -113,6 +136,27 @@ export function acceptancePlan(opts: {
 /** Whether the acceptance form has to ask for a password at all. */
 export function needsPassword(plan: AcceptancePlan): boolean {
   return plan === "create-account";
+}
+
+/**
+ * Whether spending this plan requires the visitor to already be signed in
+ * as the invitation's own address.
+ *
+ * True for both plans that resolve to an account that already exists.
+ * `link-account` is the obvious one; `already-a-member` is easy to miss,
+ * because spending it looks like a no-op — the membership is already
+ * there — but acceptInvitation still looks the account up, still signs the
+ * caller in as it, and still hands back a session at the end. An anonymous
+ * caller who merely holds the link is therefore just as able to mint a
+ * session for somebody else's account through `already-a-member` as through
+ * `link-account`; the fact that the household part is a no-op doesn't make
+ * the account part one. `create-account` is the one plan this excludes:
+ * nobody holds the address yet, so there is no existing account for a
+ * session to prove control of, and the token is genuinely the only
+ * credential there is meant to be.
+ */
+export function planRequiresSignIn(plan: AcceptancePlan): boolean {
+  return plan !== "create-account";
 }
 
 /** Whether the acceptance form has to ask what the new household is called. */

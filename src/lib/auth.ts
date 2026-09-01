@@ -14,7 +14,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import type { AuthTokenPurpose, HouseholdRole, User } from "@prisma/client";
+import type { AuthTokenPurpose, HouseholdRole, Prisma, User } from "@prisma/client";
 
 export const SESSION_COOKIE = "mp_session";
 
@@ -350,10 +350,28 @@ export async function redeemAuthToken(
 /**
  * A stable household token for the bookmarklet capture endpoint (§1). Distinct
  * from the session cookie so the cross-origin capture request can authenticate
- * without one. Derived from AUTH_SECRET, so it's stable and needs no storage.
+ * without one.
+ *
+ * Derived from AUTH_SECRET *and* the household's stored `captureKey`, not
+ * from AUTH_SECRET alone. A token that was a pure function of AUTH_SECRET and
+ * the household id could never be revoked without rotating AUTH_SECRET, which
+ * signs every account on the installation out — so a member removed from a
+ * household kept a permanent write credential into it. Mixing in a
+ * per-household value that rotateCaptureKey can rewrite on its own means
+ * removing one member invalidates that household's bookmarklet without
+ * touching anyone else's session.
+ *
+ * A household id that doesn't exist derives from an empty key rather than
+ * throwing, so a bad id fails the safeEqual comparison in
+ * isValidCaptureToken like any other wrong token, instead of every caller
+ * needing to handle a throw for a household that isn't theirs to worry about.
  */
-export function captureToken(householdId: string): Promise<string> {
-  return hmacHex(`capture:${householdId}`);
+export async function captureToken(householdId: string): Promise<string> {
+  const household = await prisma.household.findUnique({
+    where: { id: householdId },
+    select: { captureKey: true },
+  });
+  return hmacHex(`capture:${householdId}:${household?.captureKey ?? ""}`);
 }
 
 export async function isValidCaptureToken(
@@ -362,6 +380,36 @@ export async function isValidCaptureToken(
 ): Promise<boolean> {
   if (!householdId || !token) return false;
   return safeEqual(token, await captureToken(householdId));
+}
+
+/**
+ * Rotate a household's capture-token salt (§1).
+ *
+ * Call this whenever somebody loses access to the household — a member is
+ * removed, leaves by removing themselves, or a platform admin's membership
+ * intervention takes them out — so every previously-issued bookmarklet for
+ * the household stops authenticating immediately. This rotates the token for
+ * *everyone* still in the household too, not just the person who left: there
+ * is no way to invalidate one copy of a shared household credential without
+ * invalidating all of them. That is the correct trade anyway — a stale
+ * bookmarklet is an annoyance a remaining member notices and re-copies from
+ * Settings once; a capture token still live in the hands of somebody who was
+ * removed is a standing, unattended way to keep writing into a household's
+ * recipe library forever.
+ *
+ * Takes an optional transaction client so the rotation can commit atomically
+ * with the membership deletion that triggered it, which is what makes "the
+ * membership is gone" and "the old token stops working" a single fact rather
+ * than a window between two separate writes.
+ */
+export async function rotateCaptureKey(
+  householdId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<void> {
+  await client.household.update({
+    where: { id: householdId },
+    data: { captureKey: generateToken() },
+  });
 }
 
 /**

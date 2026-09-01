@@ -1,5 +1,7 @@
 import { headers } from "next/headers";
 import Link from "next/link";
+import { currentUser } from "@/lib/currentUser";
+import { invitationPath, planRequiresSignIn } from "@/lib/invitations";
 import { inspectInvitation } from "@/lib/invitationService";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { recordThrottleOnce } from "@/lib/rateLimit";
@@ -42,6 +44,19 @@ export default async function InvitePage({
   if (!invitation) return <DeadEnd state="invalid" />;
   if (invitation.state !== "live") return <DeadEnd state={invitation.state} />;
 
+  // link-account and already-a-member both spend an account that already
+  // exists, and acceptInvitation now refuses to mint a session for one of
+  // those from an anonymous request — the fix for the takeover this page
+  // used to make possible (a mailed or forwarded link was, by itself, enough
+  // to sign in as whoever it was addressed to). A visitor with no session at
+  // all is told that plainly, before they fill anything in, rather than
+  // discovering it only after submitting a form that was never going to
+  // succeed. A visitor signed in as some *other* address still reaches
+  // AcceptForm below, which already has its own dead end for that case.
+  if (planRequiresSignIn(invitation.plan) && !(await currentUser())) {
+    return <SignInRequired email={invitation.email} token={token} />;
+  }
+
   return (
     <AcceptForm
       token={token}
@@ -77,6 +92,33 @@ function Throttled({ retryAfterSeconds }: { retryAfterSeconds: number }) {
       <p style={{ color: "var(--muted)" }}>
         This address has opened a lot of invitation links in a short time. Wait about {minutes}{" "}
         minute{minutes === 1 ? "" : "s"} and try this link again.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * What a visitor with no session sees when the invitation is for an address
+ * that already has an account (§9).
+ *
+ * `next` sends them back to this exact invite URL once they've signed in —
+ * the login page already supports that (src/app/login/page.tsx) and only
+ * ever follows a relative path, so there is no new open-redirect surface to
+ * introduce here. After that round trip inspectInvitation and currentUser
+ * both see the same session, this function's own check passes, and the
+ * ordinary AcceptForm appears — no separate "resume acceptance" flow to
+ * build or keep in sync with the real one.
+ */
+function SignInRequired({ email, token }: { email: string; token: string }) {
+  return (
+    <div className="card" style={{ maxWidth: 380, margin: "3rem auto" }}>
+      <h1>Sign in to accept this invitation</h1>
+      <p style={{ color: "var(--muted)" }}>
+        <strong>{email}</strong> already has a MealPlanner account. Sign in with that address and
+        you&apos;ll land back here to finish joining — nothing about your password changes.
+      </p>
+      <p style={{ marginTop: 16 }}>
+        <Link href={`/login?next=${encodeURIComponent(invitationPath(token))}`}>Sign in</Link>
       </p>
     </div>
   );

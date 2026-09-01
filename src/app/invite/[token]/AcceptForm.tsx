@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { InvitationKind } from "@prisma/client";
-import type { AcceptancePlan } from "@/lib/invitations";
+import { invitationPath, type AcceptancePlan } from "@/lib/invitations";
 
 /**
  * Spend an invitation (§9).
@@ -58,6 +58,11 @@ export function AcceptForm(props: {
   // rather than a generic error, because the fix isn't "try again" — it's
   // "sign out first" — and the two look identical unless we say so.
   const [mismatch, setMismatch] = useState(false);
+  // The server-side twin of the page's own SignInRequired check
+  // (page.tsx): normally caught before this form ever renders, but a
+  // session that expires or signs out in another tab between the page load
+  // and this submit would otherwise show a bare "something went wrong".
+  const [signInRequired, setSignInRequired] = useState(false);
   const [busy, setBusy] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -95,6 +100,10 @@ export function AcceptForm(props: {
         }
         if (body.error === "email-mismatch") {
           setMismatch(true);
+          return;
+        }
+        if (body.error === "sign-in-required") {
+          setSignInRequired(true);
           return;
         }
         setError(
@@ -140,6 +149,22 @@ export function AcceptForm(props: {
     } finally {
       setSigningOut(false);
     }
+  }
+
+  if (signInRequired) {
+    return (
+      <div className="card" style={{ maxWidth: 380, margin: "3rem auto" }}>
+        <h1>Sign in to accept this invitation</h1>
+        <p style={{ color: "var(--muted)" }}>
+          <strong>{email}</strong> already has a MealPlanner account, so this link only works from a
+          browser signed in as that address. Sign in and reopen this link to finish joining —
+          nothing about your password changes.
+        </p>
+        <p style={{ marginTop: 12 }}>
+          <Link href={`/login?next=${encodeURIComponent(invitationPath(token))}`}>Sign in</Link>
+        </p>
+      </div>
+    );
   }
 
   if (mismatch) {

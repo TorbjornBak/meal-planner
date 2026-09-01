@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
 import { memberRemovalRefusal } from "@/lib/invitations";
 import { recordAudit } from "@/lib/audit";
+import { rotateCaptureKey } from "@/lib/auth";
 
 /**
  * The household roster (§9).
@@ -94,8 +95,17 @@ export async function DELETE(req: Request) {
   if (refusal === "not-a-member") return NextResponse.json({ error: refusal }, { status: 404 });
   if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
 
-  await prisma.householdMembership.delete({
-    where: { householdId_userId: { householdId: context.household.id, userId: id } },
+  // Rotating the household's bookmarklet capture key in the same transaction
+  // as the membership delete (§1) is what makes "no longer a member" and "no
+  // longer holds a working capture token" one atomic fact rather than a
+  // window in which the removed member's old token still validates. This
+  // rewrites the token for every remaining member too, not just the one who
+  // left — see rotateCaptureKey's own comment for why that's the right trade.
+  await prisma.$transaction(async (tx) => {
+    await tx.householdMembership.delete({
+      where: { householdId_userId: { householdId: context.household.id, userId: id } },
+    });
+    await rotateCaptureKey(context.household.id, tx);
   });
 
   // The same action a platform admin's intervention writes (§9c) — there is

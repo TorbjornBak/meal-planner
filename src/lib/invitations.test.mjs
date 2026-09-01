@@ -22,6 +22,7 @@ import {
   memberRemovalRefusal,
   needsHouseholdName,
   needsPassword,
+  planRequiresSignIn,
   roleChangeRefusal,
 } from "./invitations.ts";
 
@@ -110,32 +111,50 @@ test("invitationState defaults to judging against the current moment", () => {
 });
 
 // --- acceptanceRefusal --------------------------------------------------------
+//
+// signedInEmail is the visitor's own session address (already normalized) or
+// null for no session at all — never defaulted to the invitation's address.
+// That default is exactly the bug this rule closes: see the module comment.
 
-test("a revoked invitation is refused as revoked, regardless of who presents which email", () => {
+test("a revoked invitation is refused as revoked, regardless of who is signed in or what plan applies", () => {
   const inv = invitation({ revokedAt: new Date(NOW.getTime() - 1000) });
-  assert.equal(acceptanceRefusal(inv, inv.email, NOW), "revoked");
-  // Even the matching address doesn't get past a revocation.
-  assert.equal(acceptanceRefusal(inv, "someone.else@example.test", NOW), "revoked");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: inv.email, plan: "create-account" }, NOW), "revoked");
+  // Even the matching address, and even a plan that would otherwise be let
+  // through anonymously, doesn't get past a revocation.
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: null, plan: "create-account" }, NOW), "revoked");
+  assert.equal(
+    acceptanceRefusal(inv, { signedInEmail: "someone.else@example.test", plan: "link-account" }, NOW),
+    "revoked",
+  );
 });
 
-test("an accepted invitation is refused as accepted, regardless of the presented email", () => {
+test("an accepted invitation is refused as accepted, regardless of session or plan", () => {
   const inv = invitation({ acceptedAt: new Date(NOW.getTime() - 1000) });
-  assert.equal(acceptanceRefusal(inv, inv.email, NOW), "accepted");
-  assert.equal(acceptanceRefusal(inv, "someone.else@example.test", NOW), "accepted");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: inv.email, plan: "create-account" }, NOW), "accepted");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: null, plan: "create-account" }, NOW), "accepted");
 });
 
-test("an expired invitation is refused as expired, regardless of the presented email", () => {
+test("an expired invitation is refused as expired, regardless of session or plan", () => {
   const inv = invitation({ expiresAt: new Date(NOW.getTime() - 1) });
-  assert.equal(acceptanceRefusal(inv, inv.email, NOW), "expired");
-  assert.equal(acceptanceRefusal(inv, "someone.else@example.test", NOW), "expired");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: inv.email, plan: "create-account" }, NOW), "expired");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: null, plan: "create-account" }, NOW), "expired");
 });
 
-test("a live invitation presented with a different address is refused as a mismatch", () => {
-  assert.equal(acceptanceRefusal(invitation(), "someone.else@example.test", NOW), "email-mismatch");
+test("a live invitation, signed in under a different address, is refused as a mismatch — whatever the plan", () => {
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: "someone.else@example.test", plan: "create-account" }, NOW),
+    "email-mismatch",
+  );
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: "someone.else@example.test", plan: "link-account" }, NOW),
+    "email-mismatch",
+  );
 });
 
-test("a live invitation presented with the exact address it names is allowed", () => {
-  assert.equal(acceptanceRefusal(invitation(), "invitee@example.test", NOW), null);
+test("a live invitation signed in under the exact address it names is allowed, for every plan", () => {
+  assert.equal(acceptanceRefusal(invitation(), { signedInEmail: "invitee@example.test", plan: "create-account" }, NOW), null);
+  assert.equal(acceptanceRefusal(invitation(), { signedInEmail: "invitee@example.test", plan: "link-account" }, NOW), null);
+  assert.equal(acceptanceRefusal(invitation(), { signedInEmail: "invitee@example.test", plan: "already-a-member" }, NOW), null);
 });
 
 test("the email check is exact — it neither case-folds nor trims", () => {
@@ -145,9 +164,73 @@ test("the email check is exact — it neither case-folds nor trims", () => {
   // anyway, right up until it meets an address this function's idea of
   // case-folding disagrees with.
   const inv = invitation({ email: "invitee@example.test" });
-  assert.equal(acceptanceRefusal(inv, "Invitee@Example.Test", NOW), "email-mismatch");
-  assert.equal(acceptanceRefusal(inv, "invitee@example.test ", NOW), "email-mismatch");
-  assert.equal(acceptanceRefusal(inv, " invitee@example.test", NOW), "email-mismatch");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: "Invitee@Example.Test", plan: "create-account" }, NOW), "email-mismatch");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: "invitee@example.test ", plan: "create-account" }, NOW), "email-mismatch");
+  assert.equal(acceptanceRefusal(inv, { signedInEmail: " invitee@example.test", plan: "create-account" }, NOW), "email-mismatch");
+});
+
+// --- planRequiresSignIn / the anonymous-takeover fix --------------------------
+//
+// This is the rule that closes the vulnerability: an invitation token must
+// never, by itself, be enough to mint a session for an account that already
+// exists. Before this fix, acceptInvitation defaulted a missing
+// signedInEmail to the invitation's own address, which made the email check
+// above vacuous for an anonymous caller — the token alone satisfied it every
+// time. These cases are the ones that mattered in practice.
+
+test("only create-account can be spent anonymously", () => {
+  assert.equal(planRequiresSignIn("create-account"), false);
+  assert.equal(planRequiresSignIn("link-account"), true);
+  assert.equal(planRequiresSignIn("already-a-member"), true);
+});
+
+test("link-account with no session at all is refused — the account-takeover case", () => {
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: null, plan: "link-account" }, NOW),
+    "sign-in-required",
+  );
+});
+
+test("link-account with a session matching the invitation's own address is allowed", () => {
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: "invitee@example.test", plan: "link-account" }, NOW),
+    null,
+  );
+});
+
+test("link-account with a session for a different address is refused as a mismatch, not sign-in-required", () => {
+  // The visitor does have a session — it's simply the wrong one. Reporting
+  // that as "you're not signed in" would be actively misleading, since they
+  // are; email-mismatch is the accurate word for what's wrong.
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: "someone.else@example.test", plan: "link-account" }, NOW),
+    "email-mismatch",
+  );
+});
+
+test("create-account with no session is still allowed — a brand new person has no session to hold", () => {
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: null, plan: "create-account" }, NOW),
+    null,
+  );
+});
+
+test("already-a-member with no session is refused exactly like link-account", () => {
+  // Easy to assume this one is harmless because the membership already
+  // exists and spending the link is a no-op — but acceptInvitation still
+  // signs the caller in as the existing account either way, so it is just as
+  // capable of handing an anonymous caller somebody else's session.
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: null, plan: "already-a-member" }, NOW),
+    "sign-in-required",
+  );
+});
+
+test("already-a-member with a matching session is allowed", () => {
+  assert.equal(
+    acceptanceRefusal(invitation(), { signedInEmail: "invitee@example.test", plan: "already-a-member" }, NOW),
+    null,
+  );
 });
 
 // --- acceptancePlan, needsPassword, needsHouseholdName ------------------------

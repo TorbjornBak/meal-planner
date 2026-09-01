@@ -15,14 +15,19 @@ import { clientIp } from "@/lib/rateLimitPolicy";
 /**
  * POST /api/invitations/accept — spend an invitation (§9).
  *
- * Public, because the whole point is that the person answering has no account
- * yet. What stands in for a session is the link itself: single use, seven days,
- * and bound to one mailbox.
+ * Public, because the ordinary case is a person answering who has no account
+ * yet: for them, the link itself stands in for a session — single use, seven
+ * days, and bound to one mailbox. That is *not* extended to an address that
+ * already has an account: acceptInvitation refuses those with
+ * `sign-in-required` unless the caller already holds a session for that
+ * exact address, because otherwise the link alone would be a bearer
+ * credential for signing in as somebody else with no password at all.
  *
  * On success the caller is signed in and the browser's active household is the
- * one they just joined. They proved control of the address and (when there was
- * one to choose) chose a password; bouncing them to a login form to type it
- * again would be ceremony.
+ * one they just joined. They proved control of the address — by opening the
+ * link when no account existed yet, or by already being signed in as it when
+ * one did — and (when there was one to choose) chose a password; bouncing
+ * them to a login form to type it again would be ceremony.
  */
 
 const Input = z.object({

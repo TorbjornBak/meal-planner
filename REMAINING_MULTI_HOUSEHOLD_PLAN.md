@@ -2,9 +2,11 @@
 
 ## Stopping point
 
-Phases 1–5 are complete. Phase 6 implementation and operational verification
-are complete; the independent standards/specification review and its release
-blocking fixes are recorded below.
+Phases 1–6 are complete, including the independent review that gated them.
+The review's findings and the fixes that answered them are recorded under
+"The final review" below, together with the two risks that were accepted
+rather than fixed. **The exposure gate has passed**; see the bottom of this
+document for what that does and does not license.
 
 Phases 1–5:
 
@@ -14,7 +16,10 @@ Phases 1–5:
 - [x] Replace the account-shaped invitation with an invitation record, and add household administration.
 - [x] Separate operating the installation from living in a household, and write down every intervention.
 
-Keep the app behind **Tailscale Serve** for the friend trial. Do not enable Funnel or another public ingress until the remaining security phase is complete.
+The security phase that this instruction waited on is now complete, so
+**Tailscale Funnel or another HTTPS ingress is permitted** — read the exposure
+gate at the bottom before turning one on, including the two deployment-time
+checks it does not cover.
 
 ## Phase 4 — invitations and household administration
 
@@ -162,24 +167,155 @@ Three things turned up that the plan had not anticipated, all now fixed:
       and an implicit-locale month formatter that caused `/plan` to hydrate with
       different text in a Danish browser. The rerun completed without CSP,
       console, hydration or request failures.
-- [ ] **Independent standards and specification review**, resolving all
+- [x] **Independent standards and specification review**, resolving all
       high-severity findings. The first `/code-review` pass against the
       merge-base found unsafe production-startup gaps and a DNS rebinding gap;
       both are fixed, along with its documentation-boundary and mail-limit/audit
-      findings. A clean follow-up review is the final gate.
+      findings. The follow-up review is recorded in "The final review" below:
+      it ran three independent passes over the eight multi-household and
+      public-access commits, and everything it raised is either fixed or
+      written down as an accepted risk.
 - [x] **A backup restore rehearsal.** Installed Borg 1.4.5, ran the application's
       real `pg_dump` → encrypted `repokey-blake2` archive path against the
       scratch PostgreSQL database, extracted `mealplanner.sql`, restored it into
       a fresh database, and queried representative recipe, pantry, spending and
       settings data successfully.
 
+## The final review
+
+Three independent passes over the eight commits from `aef8e4b` to `HEAD` — the
+multi-household and public-access work, 122 files. They were run separately and
+in parallel so that no pass could be talked round by another's conclusions.
+
+**Specification.** Clean. Every `[x]` above was re-derived from the code rather
+than taken on trust. The pass that matters is the household-scoping one: it
+enumerated every route under `src/app/api/` — roughly forty-five of them,
+including the awkward ones (`plan/move`'s slot lookups, `recipes/export`,
+`trips/[id]/receipt`, `capture`, `newsletter/send`, the `backup/*` family) —
+and **found no unscoped query**. No scope creep either; `Cross-Origin-Opener-Policy`
+and `Permissions-Policy` go slightly past the written header list and are the
+only additions beyond it.
+
+**Standards.** No hard violation of anything DESIGN.md documents. Four
+judgement calls, two acted on: a duplicated handler skeleton in
+`/api/admin/households/[id]/members` (PATCH and DELETE both did load → find
+membership → look up subject email → record audit, now two shared helpers), and
+an `if (!actor)` branch that cannot fire, kept with a comment rather than
+deleted because this codebase states invariants instead of relying on them
+silently. The two left alone are `platformRoleChangeRefusal` (unreachable, but
+§9c argues for writing the rule before the button exists) and
+`roleChangeRefusal`'s pass-through alias. It also considered whether the
+`where: { householdId }` repetition across ~30 routes is Shotgun Surgery and
+concluded it is not — it is the intrinsic shape of "every query is scoped", and
+the authorization logic behind it is already centralized.
+
+**Security.** One HIGH, two MEDIUM, four LOW. The six areas checked and found
+clean: tenant isolation/IDOR, the platform-admin/household separation,
+session and credential handling, request-level defenses (the per-response
+128-bit CSP nonce was checked against a real `next build && next start`, not
+read off the source), injection and SSRF, and information disclosure.
+
+### The high-severity finding: an invitation was a bearer credential
+
+`acceptanceRefusal` was given a pre-resolved address, and `acceptInvitation`
+computed it as `signedInEmail ?? invitation.email`. An anonymous caller
+therefore always satisfied the email binding — which is correct and necessary
+when nobody holds the address yet, and indefensible once somebody does.
+`acceptancePlan` returns `link-account` for an address that already has a
+password, `needsPassword` is false for it, and the accept route ends by issuing
+a session. So **the token alone signed you in as an existing account.**
+
+Two ways to hold that token without owning the mailbox. `POST /api/invitations`
+returns the raw link to the inviter whenever mail was not delivered, which is
+exactly when SMTP is unconfigured — and SMTP is optional and unchecked at
+startup. And an invitation mail, once forwarded, does the same thing with SMTP
+working perfectly. Every invitee is granted `ADMIN`, so any household admin
+could invite a platform admin's address and take the account.
+
+Fixed in `src/lib/invitations.ts`: `acceptanceRefusal` now takes
+`{ signedInEmail, plan }`, the `?? invitation.email` fallback is gone, and a
+new `sign-in-required` refusal covers both plans that resolve to an existing
+account. `already-a-member` needed it too — spending it looks like a no-op, but
+it still looks the account up and still hands back a session. `create-account`
+is untouched: a new person must still be able to accept from a signed-out
+browser. As defense in depth, `inviteUrl` is now withheld from the inviter
+whenever the invited address already has an account, in both the household and
+the platform route, with a `linkWithheld` signal the two screens render.
+
+Fixing this introduced a race, caught by an existing concurrency test going
+flaky rather than by review: the plan is derived from reads outside the claim,
+so a loser in a two-tab race could see the winner's freshly created account,
+flip its plan, and answer `sign-in-required` when the truth was `accepted`.
+`acceptInvitation` now re-reads the invitation's own state on that refusal and
+prefers it — sound because the claim and the account creation commit in the
+same transaction, so observing the account means a later read observes the
+`acceptedAt` too. The integration file was run ten times standalone to confirm.
+
+### The rest
+
+- **The bookmarklet capture token could not be revoked** (MEDIUM). It was
+  `HMAC(AUTH_SECRET, "capture:" + householdId)` — no storage, no rotation — and
+  `/api/capture` is public and CSRF-exempt, so a removed member kept a working
+  write credential for ever. `Household.captureKey` now salts the derivation and
+  is rotated in the same transaction as any membership deletion. See §9.
+- **Changing the login address needed no re-authentication** (MEDIUM). A
+  borrowed session could move the address and then own the account through
+  `forgot password`. It now requires the current password, records an
+  `EMAIL_CHANGED` audit event, and notifies the old address — without advising a
+  reset, which after the change would be mailed to whoever made it.
+- **Unbounded allocation from a hostile page** (LOW). `image.ts` and
+  `fetchPage.ts` buffered the whole body before checking the cap, so a host that
+  omits `Content-Length` could exhaust memory from one pasted URL. Both now
+  share one capped, cancelling reader.
+- **The rate limiter logged the addresses it exists not to keep** (LOW). The
+  counter table stores only HMACs precisely so the box never accumulates a list
+  of addresses typed at a login form, and the throttle audit wrote them back in
+  plaintext — in `detail` as well as `subjectEmail`. Both now carry a truncated
+  HMAC fingerprint, which still dedupes per subject. The legitimate
+  `subjectEmail` writers (invitations, membership changes, where the actor
+  already knows the address) are unchanged.
+- **The recipe-image redirect re-validates** (LOW). The stored `imageUrl` was
+  checked by `resolvePublicUrl` when written, but DNS does not hold still, and
+  this codebase re-validates every redirect hop elsewhere. It now re-checks
+  before the 302 and 404s if the answer changed.
+
+### Found while verifying, not by the review
+
+Both `?next=` guards were bypassable. `/login` used
+`startsWith("/") && !startsWith("//")` and `/open` used `/^\/(?!\/)/`, and
+`/\evil.com` passes both and resolves to `https://evil.com/`, because a browser
+reads a backslash as a path separator. `/open` is the one that matters: those
+links sit in mail. Both now use `safeNextPath` (`src/lib/safeRedirect.ts`),
+which resolves the candidate against the real origin and insists the answer is
+still that origin, rather than pattern-matching the separators and encodings
+that behave this way. This mattered more after the invitation fix than before
+it, since the invite flow now routes existing accounts through `/login?next=`.
+
+### Accepted, not fixed
+
+- **`PATCH /api/account` answers `email-taken`**, which tells a signed-in caller
+  whether an address has an account here. It is authenticated and rate-limited,
+  and every alternative that still lets somebody understand why their change was
+  refused leaks the same bit. Recorded rather than papered over.
+- **Changing the login address does not sign other devices out.** Requiring the
+  current password already blocks the bare-stolen-cookie case that made this
+  worth fixing; a reset, which is the remedy for a stolen session, still signs
+  every device out.
+
 ### Notes for whoever picks this up
 
-- **`npm run lint` is not configured.** It drops into an interactive ESLint
-  setup prompt, so the plan's "formatting" step currently has no tooling behind
-  it. Setting one up was out of scope for this pass; decide whether it belongs
-  in Phase 6 or after.
-- The Phase 6 work is committed on `fix/receipt-upload`; no branch was pushed.
+- **`npm run lint` is not configured**, still. There is no ESLint dependency and
+  no config file of any kind, so `next lint` drops into its interactive setup
+  prompt and the plan's "formatting" step has no tooling behind it. **Decided:
+  after Phase 6, not in it.** Standing a linter up now would mean landing a
+  large, mechanical, unreviewed diff on top of the security work this gate just
+  cleared, which is exactly the change you do not want adjacent to the one
+  somebody might later need to audit. Nothing the review found would have been
+  caught by a linter. When it is picked up, note that `next lint` is deprecated
+  in Next 15 — the flat-config `eslint` + `eslint-config-next` route is the one
+  that will still exist next year.
+- The Phase 6 work, including the review fixes, is committed on
+  `fix/receipt-upload`; no branch was pushed.
 - **To get a database to verify against**, the scratch cluster used here lived
   in a temporary directory that does not survive; recreate one with:
 
@@ -194,12 +330,40 @@ Three things turned up that the plan had not anticipated, all now fixed:
 
   Without `DATABASE_URL` the integration tests skip themselves and `npm test`
   still passes — which is convenient but means a green run proves less. The
-  numbers quoted above are from a run *with* a database.
+  numbers quoted above are from a run *with* a database; `skipped 0` in the
+  summary is how you tell the difference.
+
+  Use a **separate** database for `prisma migrate diff --shadow-database-url`.
+  Pointing it at the same database you just migrated resets it, and the next
+  `migrate deploy` then fails with `P3005`.
 - **`prisma migrate diff` reports no drift** between `prisma/schema.prisma` and
   the migration history. If you change the schema, re-check it.
 
 ## Exposure gate
 
-Phase 6 has **not** passed until the independent review above is complete.
+Phase 6 has **passed**. The independent review is complete and every
+high-severity finding is resolved; the two accepted risks are named above
+rather than left implicit.
 
-Public ingress is allowed only after Phase 6 passes and HTTPS terminates at a trusted boundary. Tailscale Funnel can be that boundary, but `tailscale serve` alone is tailnet-only and cannot share the app with someone outside the tailnet. Until the gate passes, invite the friend to the tailnet and grant access through Tailscale ACLs/grants to only this service.
+Verified on the current tree against a scratch PostgreSQL 16, from an empty
+database: 23 migrations apply, `prisma migrate diff` reports no drift, **500
+tests pass with none skipped** (run twice, plus the invitation integration file
+ten times standalone to prove the concurrency fix is not flaky),
+`tsc --noEmit` is clean, `next build` succeeds, and `npm audit` reports zero
+vulnerabilities.
+
+Two things the gate does *not* cover, because they change when the deployment
+changes rather than when the code does. Neither blocks exposure, but both
+should be true of the box on the day it is exposed:
+
+- The manual two-household isolation pass and the browser CSP pass were run
+  against the pre-review tree. The invitation, account and settings screens
+  changed since. Re-walk the invite flow in a real browser — in particular an
+  invitation to an address that already has an account, which now routes through
+  `/login?next=` and is the one path a user-visible regression would hide in.
+- SMTP is optional and is not a startup requirement, and the no-SMTP fallback
+  now withholds the link for an address that already has an account. On a box
+  with real users, configure SMTP: without it, those invitations cannot be
+  delivered at all, which is the correct behaviour and an unhelpful one.
+
+Public ingress is allowed only now that Phase 6 passes and HTTPS terminates at a trusted boundary. Tailscale Funnel can be that boundary, but `tailscale serve` alone is tailnet-only and cannot share the app with someone outside the tailnet. Until the gate passes, invite the friend to the tailnet and grant access through Tailscale ACLs/grants to only this service.

@@ -179,12 +179,35 @@ export function tooManyRequests(refusal: Refusal): NextResponse {
   );
 }
 
+/**
+ * A short, stable stand-in for a throttled subject, safe to put in a
+ * human-readable audit sentence or use as a dedup key — never the address
+ * itself.
+ *
+ * Built from the same AUTH_SECRET-keyed digest as the counter table above,
+ * rather than a second scheme invented for this one call site: it's the same
+ * property that makes that table safe to keep — two different subjects still
+ * produce two different fingerprints, so "the same address tripped this
+ * bucket three times" stays distinguishable from "three different addresses
+ * did," but nothing here is invertible back to what was typed. Truncated to
+ * 12 hex characters because this is read by a person skimming a sentence, not
+ * compared byte-for-byte — the full 32-byte HMAC would be noise there.
+ */
+export async function throttleFingerprint(
+  bucket: LimitName,
+  subject: string | null,
+): Promise<string | null> {
+  if (subject === null) return null;
+  return (await digest(bucket, subject)).slice(0, 12);
+}
+
 /** Record at most one AUTH_THROTTLED event per subject and fixed window. */
 export async function recordThrottleOnce(opts: {
   bucket: LimitName;
   subject: string | null;
 }): Promise<void> {
-  const detail = throttleDetail(opts.bucket, opts.subject);
+  const fingerprint = await throttleFingerprint(opts.bucket, opts.subject);
+  const detail = throttleDetail(opts.bucket, fingerprint);
   const windowStart = windowStartAt(Date.now(), LIMITS[opts.bucket].windowMs);
   const already = await prisma.auditEvent.findFirst({
     where: { action: "AUTH_THROTTLED", detail, createdAt: { gte: windowStart } },
@@ -194,7 +217,23 @@ export async function recordThrottleOnce(opts: {
 
   await recordAudit({
     action: "AUTH_THROTTLED",
-    subjectEmail: opts.bucket.endsWith(":email") ? opts.subject : null,
+    // Never the plaintext subject here, even for an ":email" bucket. The
+    // counter table above is keyed by an HMAC specifically so this
+    // installation never accumulates the addresses somebody typed at a login
+    // form — including every address that turned out not to exist, which is
+    // to say a list of other people's mailboxes gathered by whoever was
+    // probing. Writing the same value into subjectEmail the moment it's
+    // throttled would undo that for exactly the addresses an attacker chose.
+    // `detail` above carries the fingerprint instead, which is enough to see
+    // that a throttle fired and in which bucket — the point of the row —
+    // without the row becoming a second copy of the thing the counter table
+    // was built not to keep.
+    //
+    // This is unlike AuditEvent.subjectEmail's other writers (invitation and
+    // membership events): there, subjectEmail names someone the actor —
+    // a signed-in admin acting on purpose — already knew by address, not
+    // someone an unauthenticated caller merely typed at a form.
+    subjectEmail: null,
     detail,
   });
 }

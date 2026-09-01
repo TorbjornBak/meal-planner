@@ -26,6 +26,7 @@ import {
   invitationState,
   needsHouseholdName,
   needsPassword,
+  planRequiresSignIn,
 } from "@/lib/invitations";
 
 /** An invitation plus the raw token, which exists only in this return value. */
@@ -161,6 +162,37 @@ export async function isAlreadyMember(email: string, householdId: string): Promi
     select: { userId: true },
   });
   return found !== null;
+}
+
+/**
+ * Whether handing this invitation's bare link straight to the inviter — the
+ * undelivered-mail fallback — would be handing them a bearer credential for
+ * an account that already belongs to somebody else.
+ *
+ * Mirrors the same two facts acceptInvitation itself checks, through the
+ * same pure rule (`planRequiresSignIn`, src/lib/invitations.ts): whether an
+ * account already exists at the address, and whether it already belongs to
+ * the household this invitation is for. `alreadyMember` is only ever false
+ * at issue time — a household invitation refuses to be issued at all once
+ * POST /api/invitations has already found the address on the roster, and a
+ * platform invitation has no household yet to belong to — but it is asked
+ * for explicitly rather than assumed, so this function stays true to what
+ * acceptInvitation would actually decide rather than a fact true only by
+ * the caller's own bookkeeping.
+ */
+export async function acceptanceWouldRequireSignIn(opts: {
+  email: string;
+  alreadyMember: boolean;
+}): Promise<boolean> {
+  const existing = await prisma.user.findUnique({
+    where: { email: normalizeEmail(opts.email) },
+    select: { passwordHash: true },
+  });
+  const plan = acceptancePlan({
+    existingUser: existing ? { hasPassword: existing.passwordHash !== null } : null,
+    alreadyMember: opts.alreadyMember,
+  });
+  return planRequiresSignIn(plan);
 }
 
 // -----------------------------------------------------------------------------
@@ -379,6 +411,15 @@ class LostClaimError extends Error {}
  * signed in as one account who opens an invitation addressed to another is not
  * quietly given the second household under the first account; they are told the
  * link is for a different address, and can sign out and try again.
+ *
+ * It does more than that, too: for `link-account` and `already-a-member` —
+ * the two plans where the invitation's address already has an account — a
+ * session for that exact address is required, not merely allowed. Without
+ * that, the token itself would be a bearer credential good enough to sign in
+ * as somebody else's pre-existing account with no password at all, which is
+ * precisely what a mailed or forwarded invitation link, or one handed back
+ * as `inviteUrl` on an instance with no SMTP configured, would then be. See
+ * `planRequiresSignIn` and `acceptanceRefusal` in src/lib/invitations.ts.
  */
 export async function acceptInvitation(opts: {
   token: string;
@@ -398,10 +439,20 @@ export async function acceptInvitation(opts: {
   });
   if (!invitation) return { ok: false, error: "invalid-token" };
 
-  const presented = opts.signedInEmail ? normalizeEmail(opts.signedInEmail) : invitation.email;
-  const refusal = acceptanceRefusal(invitation, presented, now);
-  if (refusal) return { ok: false, error: refusal };
+  // Never defaulted to invitation.email: a null here means genuinely
+  // anonymous, and acceptanceRefusal below treats that very differently from
+  // a session that happens to match. Collapsing the two — as this used to,
+  // by falling back to the invitation's own address — is what let a bare
+  // token mint a session for somebody else's existing account; see the
+  // module comment on acceptanceRefusal in src/lib/invitations.ts.
+  const signedInEmail = opts.signedInEmail ? normalizeEmail(opts.signedInEmail) : null;
 
+  // The plan has to be known before acceptanceRefusal can be asked anything,
+  // because whether an anonymous caller is allowed through depends on it:
+  // `create-account` is the one plan with no existing account for a session
+  // to prove control of. So this lookup — identical to the one
+  // inspectInvitation makes to word the acceptance page — now runs ahead of
+  // the refusal check rather than after it.
   const existing = await prisma.user.findUnique({
     where: { email: invitation.email },
     select: { id: true, passwordHash: true },
@@ -424,6 +475,40 @@ export async function acceptInvitation(opts: {
     existingUser: existing ? { hasPassword: existing.passwordHash !== null } : null,
     alreadyMember,
   });
+
+  const refusal = acceptanceRefusal(invitation, { signedInEmail, plan }, now);
+  if (refusal) {
+    // `plan` above came from reads of `existing` and `alreadyMember` that are
+    // not part of any claim on the row, so they can race a concurrent
+    // acceptance of this same link: two anonymous callers on a fresh
+    // PLATFORM or HOUSEHOLD invitation both start out looking like
+    // create-account, but if the winner's transaction — claim, then create
+    // the account — finishes before the loser reaches its own read of
+    // `existing`, the loser sees an account that now exists and resolves to
+    // link-account or already-a-member, which requires a sign-in it has no
+    // reason to expect. That reads as "sign in first" for a link that was
+    // actually just spent, which is the wrong thing to tell the loser and,
+    // as a table of expected outcomes, non-deterministic.
+    //
+    // The invitation row's own state is not stale in the same way: once a
+    // claim lands, `acceptedAt` is set inside the same transaction that
+    // created the account, so a fresh read of just that row (not the
+    // `invitation` fetched at the top of this function, which is exactly as
+    // stale as the plan) tells the truth about whether this link is still
+    // open. When it isn't, that fact — accepted, revoked, or expired — is
+    // what actually happened and is what gets reported, in place of a
+    // sign-in-required refusal computed from a snapshot of who exists that
+    // had already been overtaken by the time it was read.
+    if (refusal === "sign-in-required") {
+      const current = await prisma.invitation.findUnique({
+        where: { id: invitation.id },
+        select: { acceptedAt: true, revokedAt: true, expiresAt: true },
+      });
+      const freshState = current ? invitationState({ ...invitation, ...current }, now) : null;
+      if (freshState && freshState !== "live") return { ok: false, error: freshState };
+    }
+    return { ok: false, error: refusal };
+  }
 
   if (needsPassword(plan) && !opts.passwordHash) {
     return { ok: false, error: "password-required" };

@@ -15,7 +15,7 @@
  * because it's your real, logged-in browser.
  */
 
-import { guardedFetch } from "./image";
+import { guardedFetch, readCapped } from "./image";
 
 /**
  * Recipe pages are large (400–500 KB seen in the wild); cap generously.
@@ -53,10 +53,17 @@ export async function fetchPageHtml(rawUrl: string): Promise<FetchedPage | null>
     const ctype = res.headers.get("content-type") ?? "";
     if (!/text\/html|application\/xhtml/i.test(ctype)) return null;
 
+    // Trust the declared length when it's there — see `readCapped` in
+    // `image.ts` for why it isn't trusted alone: a page that omits or
+    // understates Content-Length must not get us an unbounded buffer just
+    // because it isn't a photo.
     const declared = Number(res.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > MAX_PAGE_BYTES) return null;
 
-    const html = await res.text();
+    const bytes = await readCapped(res, MAX_PAGE_BYTES);
+    if (!bytes || bytes.byteLength === 0) return null;
+
+    const html = new TextDecoder("utf-8").decode(bytes);
     if (html.length === 0 || html.length > MAX_PAGE_BYTES) return null;
 
     return { html, finalUrl: res.url || rawUrl };

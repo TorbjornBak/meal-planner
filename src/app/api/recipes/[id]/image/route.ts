@@ -35,9 +35,20 @@ export async function GET(
   }
 
   // We know where the photo lives but hold no bytes — the download failed at
-  // capture time, or the recipe predates image support. Hotlink as a fallback.
+  // capture time, or the recipe predates image support. Hotlink as a
+  // fallback, but re-run the same private-network guard every other outbound
+  // URL in this app gets immediately before using it, rather than trusting a
+  // check done once at write time. `imageUrl` was already run through
+  // `resolvePublicUrl` by both writers (`imageFromSource` below and
+  // `createRecipeFromHtml`), but DNS is not a fact fixed at the moment it was
+  // saved — a host that resolved to a public address then can resolve
+  // somewhere this server refuses to fetch (the household's own tailnet, its
+  // loopback) by the time somebody opens the recipe, same as the redirect
+  // hop this module already re-checks in `guardedFetch`. A stale/rebound
+  // target is quietly treated as "no image" rather than followed.
   if (recipe?.imageUrl) {
-    return NextResponse.redirect(recipe.imageUrl, 302);
+    const target = await resolvePublicUrl(recipe.imageUrl);
+    if (target) return NextResponse.redirect(target, 302);
   }
 
   return NextResponse.json({ error: "no image" }, { status: 404 });
