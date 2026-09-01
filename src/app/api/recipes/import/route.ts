@@ -6,6 +6,7 @@ import {
   toRecipeCreateData,
   transferKey,
 } from "@/lib/recipeTransfer";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 /**
  * POST /api/recipes/import — read a library export back in (§1, §2, §12).
@@ -27,8 +28,18 @@ import {
  * validated field by field before anything is written, duplicates are skipped
  * rather than merged, the whole import is one transaction, and every recipe
  * stays editable afterwards.
+ *
+ * No cap here on the file's own size beyond next.config.mjs's
+ * `middlewareClientMaxBodySize` (11 MB): that's a deliberate choice, not a
+ * gap — a library export is JSON text, one household's own recipes, from a
+ * signed-in member re-importing what they already had, and a household with
+ * enough recipes to threaten an 11 MB text file would be a very well-fed one.
+ * Adding a tighter cap risks rejecting a real library for no security gain.
  */
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   let body: unknown;
   try {
     body = await req.json();
@@ -55,6 +66,7 @@ export async function POST(req: Request) {
   // whole library — cheaper than asking the database once per recipe in the
   // file, and the comparison has to happen somewhere.
   const existing = await prisma.recipe.findMany({
+    where: { householdId },
     select: { name: true, source: true },
   });
   const existingKeys = existing.map((r) => transferKey(r.name, r.source));
@@ -68,7 +80,9 @@ export async function POST(req: Request) {
   if (toCreate.length) {
     await prisma.$transaction(
       toCreate.map((recipe) =>
-        prisma.recipe.create({ data: toRecipeCreateData(recipe) }),
+        prisma.recipe.create({
+          data: { ...toRecipeCreateData(recipe), householdId },
+        }),
       ),
     );
   }

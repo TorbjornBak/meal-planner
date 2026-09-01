@@ -2,6 +2,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  DEFAULT_RECIPE_KIND,
+  RECIPE_KINDS,
+  kindLabel,
+  yieldNoun,
+  type RecipeKind,
+} from "@/lib/recipeKind";
+import {
+  RECIPE_CATEGORIES,
+  UNCATEGORISED_LABEL,
+  categoryHint,
+  categoryLabel,
+  type RecipeCategory,
+} from "@/lib/recipeCategory";
 
 interface ParsedIngredient {
   name: string;
@@ -10,6 +24,20 @@ interface ParsedIngredient {
 }
 interface ParsedRecipe {
   name: string;
+  /**
+   * Dinner or drink (§2c). The parser never says — nothing in a recipe page's
+   * markup distinguishes a cortado from a casserole — so it is a choice made
+   * here, in the review step that already exists for everything the parser
+   * can't be trusted on.
+   */
+  kind: RecipeKind;
+  /**
+   * What it's made of (§2d), or null for "nobody has said". Null is the
+   * default and stays the default: the parser can't tell a vegetarian lasagne
+   * from a meat one, and this is the review step (§1), where the human
+   * corrects what we couldn't know — not one where we guess first.
+   */
+  category: RecipeCategory | null;
   source: string | null;
   instructions: string | null;
   statedServings: number;
@@ -48,7 +76,10 @@ export default function NewRecipePage() {
         setImportError(data.error ?? "Import failed.");
         return;
       }
-      router.push(`/recipes/${data.id}/edit`);
+      // `?new=1`: the import is saved but unreviewed, so the editor offers to
+      // throw it away rather than only to go back. Fetching the wrong page
+      // shouldn't leave a recipe behind.
+      router.push(`/recipes/${data.id}/edit?new=1`);
     } catch {
       setImportError("Import failed — check the URL and try again.");
     } finally {
@@ -64,7 +95,9 @@ export default function NewRecipePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      setDraft(await res.json());
+      // The parser returns no kind, and defaulting it here rather than
+      // server-side keeps /api/parse about reading text.
+      setDraft({ kind: DEFAULT_RECIPE_KIND, category: null, ...(await res.json()) });
     } finally {
       setBusy(false);
     }
@@ -157,7 +190,46 @@ export default function NewRecipePage() {
           </label>
           <br />
           <label>
-            Serves{" "}
+            This is a{" "}
+            <select
+              value={draft.kind}
+              onChange={(e) =>
+                setDraft({ ...draft, kind: e.target.value as RecipeKind })
+              }
+            >
+              {RECIPE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {kindLabel(k).toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <br />
+          <label>
+            {/* Optional, and left unset unless somebody says. An answer we
+                invented here would follow the recipe around every filter it
+                ever appears in (§2d). */}
+            Made of{" "}
+            <select
+              value={draft.category ?? ""}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  category: (e.target.value || null) as RecipeCategory | null,
+                })
+              }
+            >
+              <option value="">{UNCATEGORISED_LABEL.toLowerCase()}</option>
+              {RECIPE_CATEGORIES.map((c) => (
+                <option key={c} value={c} title={categoryHint(c)}>
+                  {categoryLabel(c).toLowerCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <br />
+          <label>
+            {yieldNoun(draft.kind)}{" "}
             <input
               type="number"
               value={draft.statedServings}

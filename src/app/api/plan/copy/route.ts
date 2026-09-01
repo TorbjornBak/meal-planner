@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { mondayOf } from "../week";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 /**
  * Copy a previous week's dinners into an open week (§3).
@@ -44,6 +45,9 @@ const CopyInput = z.object({
 
 // POST /api/plan/copy — recreate another week's dinners on this one.
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   const parsed = CopyInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -62,7 +66,9 @@ export async function POST(req: Request) {
     );
   }
 
-  const target = await prisma.weekPlan.findUnique({ where: { id: weekPlanId } });
+  const target = await prisma.weekPlan.findFirst({
+    where: { id: weekPlanId, householdId },
+  });
   if (!target) {
     return NextResponse.json({ error: "week plan not found" }, { status: 404 });
   }
@@ -77,7 +83,7 @@ export async function POST(req: Request) {
   }
 
   const source = await prisma.weekPlan.findUnique({
-    where: { weekStart: sourceWeekStart },
+    where: { householdId_weekStart: { householdId, weekStart: sourceWeekStart } },
     include: {
       slots: { orderBy: [{ dayOfWeek: "asc" }, { position: "asc" }] },
       nightNotes: true,
@@ -99,8 +105,8 @@ export async function POST(req: Request) {
   // write costs one indexed query.
   const recipeIds = [...new Set(sourceSlots.map((s) => s.recipeId))];
   const liveRecipes = recipeIds.length
-    ? await prisma.recipe.findMany({
-        where: { id: { in: recipeIds } },
+      ? await prisma.recipe.findMany({
+        where: { id: { in: recipeIds }, householdId },
         select: { id: true },
       })
     : [];
@@ -128,6 +134,7 @@ export async function POST(req: Request) {
   }
 
   const data = copyable.map((slot) => ({
+    householdId,
     weekPlanId,
     dayOfWeek: slot.dayOfWeek,
     recipeId: slot.recipeId,

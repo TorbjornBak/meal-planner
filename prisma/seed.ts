@@ -1,20 +1,36 @@
 import { PrismaClient } from "@prisma/client";
 
-// Minimal seed: the singleton settings row and a couple of pantry staples.
+// Minimal seed: the initial household's settings and a couple of pantry staples.
 const prisma = new PrismaClient();
+const INITIAL_HOUSEHOLD_ID = "initial-household";
 
 async function main() {
+  await prisma.household.upsert({
+    where: { id: INITIAL_HOUSEHOLD_ID },
+    update: {},
+    create: { id: INITIAL_HOUSEHOLD_ID, name: "Primary household" },
+  });
+
   await prisma.settings.upsert({
     where: { id: 1 },
-    update: {},
-    create: { id: 1, householdSize: 2 },
+    update: { householdId: INITIAL_HOUSEHOLD_ID },
+    create: { id: 1, householdId: INITIAL_HOUSEHOLD_ID, householdSize: 2 },
   });
 
   for (const name of ["Salt", "Olive oil", "Black pepper"]) {
     await prisma.pantryItem.upsert({
-      where: { nameKey: name.toLowerCase() },
+      where: {
+        householdId_nameKey: {
+          householdId: INITIAL_HOUSEHOLD_ID,
+          nameKey: name.toLowerCase(),
+        },
+      },
       update: {},
-      create: { name, nameKey: name.toLowerCase() },
+      create: {
+        householdId: INITIAL_HOUSEHOLD_ID,
+        name,
+        nameKey: name.toLowerCase(),
+      },
     });
   }
 }

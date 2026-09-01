@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import { formatDurationMinutes } from "@/lib/durations";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS, recipeImageSrc } from "@/lib/recipeImage";
+import { yieldNoun } from "@/lib/recipeKind";
+import { categoryHint, categoryLabel } from "@/lib/recipeCategory";
+import { requireHouseholdContext } from "@/lib/currentUser";
 import { CookingMode } from "./CookingMode";
 import { Method } from "./Method";
 
@@ -50,9 +53,10 @@ export default async function RecipeDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const { household } = await requireHouseholdContext();
   const { id } = await params;
-  const recipe = await prisma.recipe.findUnique({
-    where: { id },
+  const recipe = await prisma.recipe.findFirst({
+    where: { id, householdId: household.id },
     // The photo is fetched by the browser from its own endpoint; no need to
     // drag its bytes (or the captured page HTML) through the render.
     omit: OMIT_RECIPE_BLOBS,
@@ -82,7 +86,9 @@ export default async function RecipeDetailPage({
         {recipe.name}
       </h1>
       <p className="muted">
-        Serves {recipe.statedServings}
+        {/* "Serves 1" on a cortado reads like an apology; a drink *makes* one
+            (§2c). */}
+        {yieldNoun(recipe.kind)} {recipe.statedServings}
         {recipe.totalTimeMinutes != null ? (
           <>
             {" · "}
@@ -102,6 +108,18 @@ export default async function RecipeDetailPage({
             >
               {recipe.totalTimeIsEstimate ? "about " : ""}
               {formatDurationMinutes(recipe.totalTimeMinutes)}
+            </span>
+          </>
+        ) : null}
+        {/* Only when somebody has said. An uncategorised recipe shows nothing
+            here rather than a "not said" badge: this is the page you read at
+            the stove, and it is no place to be nagged about filing (§2d) —
+            the library's own filter is where that backlog is worked through. */}
+        {recipe.category ? (
+          <>
+            {" · "}
+            <span className="recipe-category" title={categoryHint(recipe.category)}>
+              {categoryLabel(recipe.category)}
             </span>
           </>
         ) : null}

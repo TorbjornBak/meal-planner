@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
-// Household settings (§4) — a single row (id = 1).
+// Household settings (§4) — one row per household.
 
 // GET /api/settings — current household size (created with defaults if absent).
 export async function GET() {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   const settings = await prisma.settings.upsert({
-    where: { id: 1 },
+    where: { householdId },
     update: {},
-    create: { id: 1 },
+    create: { householdId },
   });
   return NextResponse.json(settings);
 }
@@ -20,14 +24,16 @@ const PatchInput = z.object({
 
 // PATCH /api/settings — change household size (rescales future lists).
 export async function PATCH(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const parsed = PatchInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const settings = await prisma.settings.upsert({
-    where: { id: 1 },
+    where: { householdId: context.household.id },
     update: parsed.data,
-    create: { id: 1, ...parsed.data },
+    create: { householdId: context.household.id, ...parsed.data },
   });
   return NextResponse.json(settings);
 }

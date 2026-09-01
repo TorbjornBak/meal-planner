@@ -9,6 +9,8 @@ import {
   sessionCookieOptions,
 } from "@/lib/auth";
 import { dummyHash, verifyPassword } from "@/lib/password";
+import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 
 const Input = z.object({
   email: z.string().min(1).max(320),
@@ -23,6 +25,24 @@ export async function POST(req: Request) {
   }
 
   const email = normalizeEmail(parsed.data.email);
+  const ip = clientIp(req.headers);
+
+  // Consumed for every request alike, whether or not `email` turns out to
+  // belong to an account — exactly like the dummyHash() below. A limiter that
+  // only counted attempts against real accounts would itself become the
+  // oracle §9 is careful to avoid on the response that follows it.
+  const refusal = await consumeAll([
+    ["login:ip", ip],
+    ["login:email", email],
+  ]);
+  if (refusal) {
+    await recordThrottleOnce({
+      bucket: refusal.bucket,
+      subject: refusal.bucket === "login:email" ? email : ip,
+    });
+    return tooManyRequests(refusal);
+  }
+
   const user = await prisma.user.findUnique({ where: { email } });
 
   // Always pay the full scrypt cost — against a throwaway hash when there's no

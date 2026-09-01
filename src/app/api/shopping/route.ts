@@ -4,19 +4,29 @@ import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
 import { mergeManualItems } from "@/lib/manualItems";
 import { aggregateShoppingList, type SlotForList } from "@/lib/shopping";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Shopping list generation + retrieval (§5).
 
 // GET /api/shopping?weekPlanId=... — the current persisted list for a week.
 export async function GET(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const weekPlanId = new URL(req.url).searchParams.get("weekPlanId");
   if (!weekPlanId) {
     return NextResponse.json({ error: "weekPlanId required" }, { status: 400 });
   }
-  const list = await prisma.shoppingList.findUnique({
-    where: { weekPlanId },
+  const list = await prisma.shoppingList.findFirst({
+    where: { weekPlanId, weekPlan: { householdId: context.household.id } },
     include: { items: true },
   });
+  if (!list) {
+    const plan = await prisma.weekPlan.findFirst({
+      where: { id: weekPlanId, householdId: context.household.id },
+      select: { id: true },
+    });
+    if (!plan) return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
   return NextResponse.json(list);
 }
 
@@ -28,14 +38,17 @@ const PostInput = z.object({ weekPlanId: z.string().min(1) });
 // changes (§5): surviving items keep their checked state, new ingredients
 // arrive unchecked, removed ones drop off.
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   const parsed = PostInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { weekPlanId } = parsed.data;
 
-  const plan = await prisma.weekPlan.findUnique({
-    where: { id: weekPlanId },
+  const plan = await prisma.weekPlan.findFirst({
+    where: { id: weekPlanId, householdId },
     include: {
       slots: {
         include: {
@@ -49,11 +62,11 @@ export async function POST(req: Request) {
   }
 
   const settings = await prisma.settings.upsert({
-    where: { id: 1 },
+    where: { householdId },
     update: {},
-    create: { id: 1 },
+    create: { householdId },
   });
-  const pantry = await prisma.pantryItem.findMany();
+  const pantry = await prisma.pantryItem.findMany({ where: { householdId } });
   const pantryKeys = new Set(pantry.map((p) => p.nameKey));
 
   const slots: SlotForList[] = plan.slots.map((s) => ({

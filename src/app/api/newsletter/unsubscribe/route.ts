@@ -4,17 +4,21 @@ import { isValidUnsubscribeToken } from "@/lib/auth";
 import { appUrl } from "@/lib/mail";
 
 /**
- * Unsubscribe from the weekly digest (§9b).
+ * Unsubscribe from one household's weekly digest (§9b).
  *
  * Public — it has to work from a mail client, which carries no session. The
- * `t` parameter is an HMAC over the user id, so the link only opts out the
- * person it was mailed to, and knowing somebody's id isn't enough.
+ * `t` parameter is an HMAC over the user id *and* the household, so the link
+ * only opts out the person it was mailed to, from the household it was mailed
+ * about; knowing somebody's id is not enough, and neither is holding a link
+ * from a household they also belong to.
  *
- * It only clears the digest opt-in; the account and its data are untouched.
+ * It only clears one membership's digest opt-in; the account, the membership
+ * itself and all of the household's data are untouched.
  */
 async function unsubscribe(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
   const userId = url.searchParams.get("u") ?? "";
+  const householdId = url.searchParams.get("h") ?? "";
   const token = url.searchParams.get("t") ?? undefined;
 
   /**
@@ -32,12 +36,19 @@ async function unsubscribe(req: Request): Promise<NextResponse> {
     }
   };
 
-  if (!userId || !(await isValidUnsubscribeToken(userId, token))) {
+  if (
+    !userId ||
+    !householdId ||
+    !(await isValidUnsubscribeToken(userId, householdId, token))
+  ) {
     return NextResponse.redirect(landing(false));
   }
 
-  await prisma.user
-    .update({ where: { id: userId }, data: { newsletterOptIn: false } })
+  await prisma.householdMembership
+    .update({
+      where: { householdId_userId: { householdId, userId } },
+      data: { newsletterOptIn: false },
+    })
     .catch(() => {});
 
   return NextResponse.redirect(landing(true));

@@ -2,11 +2,23 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
+import { RECIPE_KINDS } from "@/lib/recipeKind";
+import { RECIPE_CATEGORIES } from "@/lib/recipeCategory";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Recipe library CRUD (§2).
 
 const RecipeInput = z.object({
   name: z.string().min(1),
+  // Dinner or drink (§2c). Optional so every existing caller — the paste-text
+  // review step, the bookmarklet, the transfer import — keeps working and gets
+  // the column's own default.
+  kind: z.enum(RECIPE_KINDS).optional(),
+  // What it's made of (§2d). Nullable as well as optional: "nobody has said"
+  // is a real answer here and the one the review step offers by default — the
+  // parser can't tell a vegetarian lasagne from a meat one, and guessing would
+  // be the app inventing a dietary claim.
+  category: z.enum(RECIPE_CATEGORIES).nullable().optional(),
   source: z.string().optional().nullable(),
   instructions: z.string().optional().nullable(),
   statedServings: z.number().int().positive(),
@@ -43,6 +55,9 @@ interface RecipeListExtras {
 // GET /api/recipes — list the library (favourites first, then by name), each
 // row carrying the week it was last cooked (§2, §3).
 export async function GET() {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const householdId = context.household.id;
   // Two queries for the whole library, and two however many recipes there are
   // — never one per recipe.
   //
@@ -59,11 +74,13 @@ export async function GET() {
   // cost. Both queries go out at once; neither depends on the other.
   const [recipes, slots] = await Promise.all([
     prisma.recipe.findMany({
+      where: { householdId },
       orderBy: [{ isFavorite: "desc" }, { name: "asc" }],
       omit: OMIT_RECIPE_BLOBS,
       include: { ingredients: { orderBy: { position: "asc" } } },
     }),
     prisma.dinnerSlot.findMany({
+      where: { weekPlan: { householdId } },
       select: { recipeId: true, weekPlan: { select: { weekStart: true } } },
     }),
   ]);
@@ -87,16 +104,21 @@ export async function GET() {
 
 // POST /api/recipes — save a reviewed-and-edited recipe (§1, §2).
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const parsed = RecipeInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { name, source, instructions, statedServings, tags, ingredients } =
+  const { name, kind, category, source, instructions, statedServings, tags, ingredients } =
     parsed.data;
 
   const recipe = await prisma.recipe.create({
     data: {
+      householdId: context.household.id,
       name,
+      ...(kind ? { kind } : {}),
+      category: category ?? null,
       source: source ?? null,
       instructions: instructions ?? null,
       statedServings,

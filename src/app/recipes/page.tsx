@@ -5,9 +5,34 @@ import Link from "next/link";
 import { recipeImageSrc } from "@/lib/recipeImage";
 import { searchRecipes } from "@/lib/recipeSearch";
 import { formatDurationMinutes } from "@/lib/durations";
+import {
+  DEFAULT_RECIPE_KIND,
+  RECIPE_KINDS,
+  emptyKindLine,
+  isPlannable,
+  kindLabel,
+  kindPlural,
+  yieldNoun,
+  type RecipeKind,
+} from "@/lib/recipeKind";
+import {
+  CATEGORY_FILTERS,
+  categoryFilterLabel,
+  categoryHint,
+  categoryLabel,
+  matchesCategoryFilter,
+  type CategoryFilter,
+  type RecipeCategory,
+} from "@/lib/recipeCategory";
 
 // Recipe library (§2) — browse, favorite, rename, delete; filter by ingredient
 // (tag-style); and add a recipe straight onto this week's meal plan (§3).
+//
+// Two sections, one library (§2c): dinners and drinks are the same kind of
+// object and get the same row, but they answer different questions. A drink
+// never goes on a night, so its row carries neither the "add to plan" control
+// nor the "last cooked" line — both would be permanently untrue rather than
+// merely empty.
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -105,6 +130,10 @@ interface Ingredient {
 interface Recipe {
   id: string;
   name: string;
+  /// Dinner or drink (§2c) — which section of the library the row belongs in.
+  kind: RecipeKind;
+  /// What it's made of (§2d), or null when nobody has said.
+  category: RecipeCategory | null;
   source: string | null;
   statedServings: number;
   isFavorite: boolean;
@@ -140,6 +169,12 @@ export default function RecipesPage() {
   const [filterInput, setFilterInput] = useState("");
   const [sort, setSort] = useState<SortOrder>("favorites");
   const [added, setAdded] = useState<Record<string, string>>({});
+  // Which section is open. Dinner, because that is what the app is for (§3) —
+  // the drinks tab is somewhere you go on purpose.
+  const [kind, setKind] = useState<RecipeKind>(DEFAULT_RECIPE_KIND);
+  // What it's made of (§2d). "Any" by default — the library's job is to show
+  // you everything until you say otherwise.
+  const [category, setCategory] = useState<CategoryFilter>("ANY");
 
   // Read once per render rather than per row, so a list rendered across
   // midnight can't age half its recipes by a week mid-paint.
@@ -155,13 +190,28 @@ export default function RecipesPage() {
       .then(setPlan);
   }, []);
 
-  // Distinct ingredient names for the search autocomplete.
+  // The recipes in the open section. Everything below — the chips, the
+  // autocomplete, the sort — works within it, so filtering by "kaffe" in
+  // Drinks can't quietly surface a dinner.
+  const inSection = useMemo(
+    () => (recipes ?? []).filter((r) => r.kind === kind),
+    [recipes, kind],
+  );
+
+  /** How many recipes each tab holds, for the counts on the tabs themselves. */
+  const counts = useMemo(() => {
+    const byKind = new Map<RecipeKind, number>(RECIPE_KINDS.map((k) => [k, 0]));
+    for (const r of recipes ?? []) byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1);
+    return byKind;
+  }, [recipes]);
+
+  // Distinct ingredient names for the search autocomplete — from the open
+  // section only, so the drinks tab doesn't offer to filter on "hakket oksekød".
   const suggestions = useMemo(() => {
     const set = new Set<string>();
-    for (const r of recipes ?? [])
-      for (const i of r.ingredients) set.add(i.name);
+    for (const r of inSection) for (const i of r.ingredients) set.add(i.name);
     return [...set].sort((a, b) => a.localeCompare(b));
-  }, [recipes]);
+  }, [inSection]);
 
   // AND filter: a recipe must match every chip. The matching itself is
   // `searchRecipes` (§2), the same function the plan page's picker uses, so
@@ -172,11 +222,31 @@ export default function RecipesPage() {
   // splits a query on whitespace and ANDs the words separately, but a chip is
   // one phrase — "hakket oksekød" must keep matching as it always did.
   const filtered = useMemo(() => {
-    if (!recipes) return [];
-    let rows = recipes;
+    // The category narrows first, then the chips narrow what's left. Order
+    // doesn't change the result — both are ANDs — but it does keep the
+    // autocomplete's suggestions honest about the section rather than the
+    // filtered view.
+    let rows = inSection.filter((r) => matchesCategoryFilter(r.category, category));
     for (const f of filters) rows = searchRecipes(rows, f).map((m) => m.recipe);
     return rows;
-  }, [recipes, filters]);
+  }, [inSection, filters, category]);
+
+  /**
+   * What to say when nothing comes back — which is a different sentence for
+   * each reason. "No dinners saved yet" under an active fish filter reads as
+   * the library having lost everything, when the truth is that nobody has
+   * marked a dinner as fish.
+   */
+  function emptyLine(): string {
+    if (filters.length) return "No recipes match those ingredients.";
+    if (category === "UNSET") {
+      return `Every ${kindLabel(kind).toLowerCase()} has a category — nothing left to file.`;
+    }
+    if (category !== "ANY") {
+      return `Nothing in here is marked ${categoryFilterLabel(category).toLowerCase()} yet — you can set it on a recipe's edit page.`;
+    }
+    return emptyKindLine(kind);
+  }
 
   // "Favourites first" is the order the API already sent (favourites, then
   // name), so the default costs nothing and the list you know stays put.
@@ -188,7 +258,9 @@ export default function RecipesPage() {
   // missing value to be shuffled to the end. Ties — a week that held several
   // dinners — break by name, so the order is stable between renders.
   const sorted = useMemo(() => {
-    if (sort === "favorites") return filtered;
+    // Staleness is a question about the plan, and drinks are never on it, so
+    // the drinks section has one order and no control offering another.
+    if (sort === "favorites" || !isPlannable(kind)) return filtered;
     return [...filtered].sort((a, b) => {
       const at = a.lastCookedOn ? Date.parse(a.lastCookedOn) : -Infinity;
       const bt = b.lastCookedOn ? Date.parse(b.lastCookedOn) : -Infinity;
@@ -197,7 +269,7 @@ export default function RecipesPage() {
       if (at !== bt) return at < bt ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
-  }, [filtered, sort]);
+  }, [filtered, sort, kind]);
 
   function addFilter() {
     const f = filterInput.trim();
@@ -253,11 +325,64 @@ export default function RecipesPage() {
         <Link href="/recipes/new">+ Paste a new recipe</Link>
       </p>
 
+      {/* The two sections (§2c). Buttons rather than a dropdown: there are two
+          of them, the counts are worth seeing at a glance, and switching is the
+          most common thing done on this screen after searching.
+
+          Pressed toggles, not a `role="tablist"`. A tablist promises a
+          tabpanel, and the section's content here is the rest of the page —
+          the filter card and the list both — rather than one element a screen
+          reader could be pointed at. A toggle that says whether it is on is
+          the honest description of what these are. */}
+      <div role="group" aria-label="Recipe sections" className="recipe-kind-tabs">
+        {RECIPE_KINDS.map((k) => (
+          <button
+            key={k}
+            aria-pressed={k === kind}
+            className={k === kind ? "recipe-kind-tab is-selected" : "recipe-kind-tab"}
+            onClick={() => {
+              if (k === kind) return;
+              setKind(k);
+              // The chips describe a search of the section you were in.
+              // "hakket oksekød" carried into Drinks would show an empty list
+              // and look like the drinks had gone missing.
+              setFilters([]);
+              setFilterInput("");
+              // Same reasoning as the chips: "Meat" carried into Drinks would
+              // empty the list and look like the drinks had gone missing.
+              setCategory("ANY");
+            }}
+          >
+            {kindPlural(k)} <span className="muted">{counts.get(k) ?? 0}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* A second, narrower question than the tabs above: those pick a
+          section, these pick what's on the plate (§2d). Pills rather than a
+          <select> because the answer is usually one press, and because
+          "Not said" needs to be visible — it is the backlog of recipes still
+          to be filed, and a filter nobody can see is one nobody fixes. */}
+      <div role="group" aria-label="Filter by category" className="category-filters">
+        {CATEGORY_FILTERS.map((f) => (
+          <button
+            key={f}
+            className="category-filter"
+            aria-pressed={f === category}
+            title={f === "ANY" || f === "UNSET" ? undefined : categoryHint(f)}
+            onClick={() => setCategory(f)}
+          >
+            {categoryFilterLabel(f)}
+          </button>
+        ))}
+      </div>
+
       <div className="card">
         <h2>Find by ingredient</h2>
         <p className="muted">
-          Add ingredients to narrow the list to recipes that contain all of them
-          — a word from the recipe's name works too.
+          Add ingredients to narrow {kindPlural(kind).toLowerCase()} to those
+          that contain all of them — a word from the recipe&apos;s name works
+          too.
         </p>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           {filters.map((f) => (
@@ -302,31 +427,33 @@ export default function RecipesPage() {
 
       {sorted.length === 0 ? (
         <p className="muted">
-          {filters.length ? "No recipes match those ingredients." : "Nothing saved yet."}
+          {emptyLine()}
         </p>
       ) : (
         <>
-        <div
-          style={{
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            justifyContent: "flex-end",
-            margin: "12px 0",
-          }}
-        >
-          <label className="muted" htmlFor="recipe-sort">
-            Sort
-          </label>
-          <select
-            id="recipe-sort"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortOrder)}
+        {isPlannable(kind) && (
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              justifyContent: "flex-end",
+              margin: "12px 0",
+            }}
           >
-            <option value="favorites">Favourites first</option>
-            <option value="leastRecent">Least recently cooked</option>
-          </select>
-        </div>
+            <label className="muted" htmlFor="recipe-sort">
+              Sort
+            </label>
+            <select
+              id="recipe-sort"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortOrder)}
+            >
+              <option value="favorites">Favourites first</option>
+              <option value="leastRecent">Least recently cooked</option>
+            </select>
+          </div>
+        )}
         {sorted.map((r) => (
           <div className="card recipe-row" key={r.id}>
             {/* Decorative: the recipe name beside it is the real link. */}
@@ -393,22 +520,38 @@ export default function RecipesPage() {
             <div className="muted" style={{ marginTop: 4 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span>
-                  {r.ingredients.length} ingredients · serves {r.statedServings}
+                  {r.ingredients.length} ingredients ·{" "}
+                  {yieldNoun(r.kind).toLowerCase()} {r.statedServings}
                   {cookTimeLabel(r) && ` · ${cookTimeLabel(r)}`}
                 </span>
+
+                {/* Shown only when somebody has said. A "not said" badge on
+                    every unfiled row would be a permanent scold; the filter
+                    above is where that backlog is worked through (§2d). */}
+                {r.category && (
+                  <span className="recipe-category" title={categoryHint(r.category)}>
+                    {categoryLabel(r.category)}
+                  </span>
+                )}
 
                 {/* The staleness line the library was missing: the app has
                     always held this (a slot joins to its week) and never said
                     it. Italic when never cooked, because that is the row this
-                    whole screen exists to surface. */}
-                <span
-                  title={r.lastCookedOn ? weekOfLabel(r.lastCookedOn) : undefined}
-                  style={{ fontStyle: r.lastCookedOn ? "normal" : "italic" }}
-                >
-                  {lastCookedLabel(r.lastCookedOn, thisMonday)}
-                </span>
+                    whole screen exists to surface.
 
-                {plan && (
+                    Only for what can be planned. A drink is never on a night
+                    (§2c), so "Never cooked" would be a permanent fact about
+                    every row in the section rather than a nudge about one. */}
+                {isPlannable(r.kind) && (
+                  <span
+                    title={r.lastCookedOn ? weekOfLabel(r.lastCookedOn) : undefined}
+                    style={{ fontStyle: r.lastCookedOn ? "normal" : "italic" }}
+                  >
+                    {lastCookedLabel(r.lastCookedOn, thisMonday)}
+                  </span>
+                )}
+
+                {plan && isPlannable(r.kind) && (
                   <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
                     {added[r.id] ? (
                       <em>{added[r.id]}</em>

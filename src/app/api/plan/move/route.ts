@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { moveDinner } from "@/lib/planMove";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 /**
  * Move a dinner to another night (§3).
@@ -40,6 +41,8 @@ const MoveInput = z.object({
 // POST /api/plan/move — put a dinner on a different night, or higher up the one
 // it's already on.
 export async function POST(req: Request) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const parsed = MoveInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -50,8 +53,8 @@ export async function POST(req: Request) {
   // to exactly one week, so asking for it would only create a way to be wrong —
   // and the honest answer for a dinner someone else has since removed is 404,
   // not a move into a week it was never on.
-  const moving = await prisma.dinnerSlot.findUnique({
-    where: { id: slotId },
+  const moving = await prisma.dinnerSlot.findFirst({
+    where: { id: slotId, weekPlan: { householdId: context.household.id } },
     select: { weekPlanId: true },
   });
   if (!moving) {

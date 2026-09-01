@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { OMIT_RECIPE_BLOBS } from "@/lib/recipeImage";
+import { RECIPE_KINDS } from "@/lib/recipeKind";
+import { RECIPE_CATEGORIES } from "@/lib/recipeCategory";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 // Rename, favorite, and delete for a single recipe (§2).
 
@@ -10,11 +13,20 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  const recipe = await prisma.recipe.findUnique({
-    where: { id },
+  const recipe = await prisma.recipe.findFirst({
+    where: { id, householdId: context.household.id },
     omit: OMIT_RECIPE_BLOBS,
-    include: { ingredients: { orderBy: { position: "asc" } } },
+    include: {
+      ingredients: { orderBy: { position: "asc" } },
+      // How many nights it is currently on, so the editor's delete step can
+      // say what deleting costs: the slots go with it (cascade), and a recipe
+      // that is on this week's plan is not the same thing to delete as one
+      // nobody has cooked yet.
+      _count: { select: { dinnerSlots: true } },
+    },
   });
   if (!recipe) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -24,6 +36,13 @@ export async function GET(
 
 const PatchInput = z.object({
   name: z.string().min(1).optional(),
+  // Moving a recipe between the library's two sections (§2c) is an ordinary
+  // edit — a coffee filed as dinner is a typo, not a reason to retype it.
+  kind: z.enum(RECIPE_KINDS).optional(),
+  // What it's made of (§2d). Nullable so a category can be *taken back* and
+  // not merely changed — mislabelling a dish vegetarian is the one mistake
+  // here worth being able to undo to silence rather than to another claim.
+  category: z.enum(RECIPE_CATEGORIES).nullable().optional(),
   source: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   statedServings: z.number().int().positive().optional(),
@@ -53,12 +72,20 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const parsed = PatchInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { ingredients, ...fields } = parsed.data;
+
+  const owned = await prisma.recipe.findFirst({
+    where: { id, householdId: context.household.id },
+    select: { id: true },
+  });
+  if (!owned) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const recipe = await prisma.$transaction(async (tx) => {
     await tx.recipe.update({ where: { id }, data: fields });
@@ -89,7 +116,14 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
-  await prisma.recipe.delete({ where: { id } });
+  const deleted = await prisma.recipe.deleteMany({
+    where: { id, householdId: context.household.id },
+  });
+  if (deleted.count === 0) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
   return NextResponse.json({ ok: true });
 }

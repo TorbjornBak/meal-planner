@@ -1,7 +1,8 @@
 // MealPlanner v1 data model — see DESIGN.md §"Data model sketch".
 //
-// One household, one shared plan/library/ledger. Individual accounts exist for
-// sign-in and for addressing email, not for isolating data (§9).
+// Every plan, library and ledger belongs to a household. Accounts may belong to
+// several households through HouseholdMembership; every aggregate root carries
+// mandatory household ownership (§9).
 
 generator client {
   provider = "prisma-client-js"
@@ -16,10 +17,79 @@ datasource db {
 // Recipe library (§1, §2)
 // -----------------------------------------------------------------------------
 
+/// What a recipe *is*, which decides where it lives and what can be done with
+/// it (§2c).
+///
+/// A drink is a recipe in every way that matters — it is pasted and parsed the
+/// same way, it has ingredients, a method with timers, a photo — but it is not
+/// dinner. The plan is dinners only (§3), so a morning cortado has no night to
+/// sit on, and leaving drinks in the same list meant scrolling past six coffees
+/// to find the ragù. A dessert is the same argument: a pavlova belongs in the
+/// library and not on Tuesday.
+///
+/// One question with one answer, which is why these are values here rather than
+/// columns of their own. A recipe that is both a dinner and a dessert is not
+/// something the library needs to represent.
+///
+/// SIDE is the exception that proves what the column is for: it is not a
+/// dinner, but it *does* go on a night — the salad is cooked on Thursday next
+/// to the roast and bought for with it — so unlike a drink or a dessert it
+/// reaches the plan and the shopping list (§5). The column records what a
+/// recipe is; what follows from that is isPlannable / isSuggestable in
+/// src/lib/recipeKind.ts.
+///
+/// An enum rather than a reserved tag string: `tags` is free text the household
+/// types, so "drink", "Drink" and "drinks" would all mean this and none of them
+/// could be relied on by the plan picker, which has to be *sure* a recipe is
+/// plannable before offering it.
+enum RecipeKind {
+  DINNER
+  SIDE
+  DRINK
+  DESSERT
+}
+
+/// What a recipe is *made of*, at the level a household decides on (§2d).
+///
+/// One axis — what sits at the centre of the plate — and one value per recipe,
+/// because that is the shape of the question being asked. "We had fish on
+/// Monday" rules out a night; it does not rule out an ingredient.
+///
+/// An enum for the reason `RecipeKind` is one, only more so: the dashboard's
+/// suggestions (§2e) offer a recipe *as* vegetarian, and a filter reading free
+/// text will eventually put a ragù in front of someone who asked for none.
+///
+/// MEAT covers poultry — a household planning a week thinks "meat or fish or
+/// neither", and splitting the chicken out would make the commonest category
+/// two clicks. FISH covers shellfish, for the same reason. Adding a value is a
+/// value here, a value in `RECIPE_CATEGORIES`, and a migration; the words the
+/// UI needs all hang off that list (src/lib/recipeCategory.ts).
+enum RecipeCategory {
+  MEAT
+  FISH
+  VEGETARIAN
+  VEGAN
+}
+
 /// Everything pasted-and-parsed is saved here and accumulates into the library.
 model Recipe {
   id                  String           @id @default(cuid())
+  /// The private household whose library contains this recipe.
+  householdId         String
+  household           Household        @relation(fields: [householdId], references: [id], onDelete: Cascade)
   name                String
+  /// Dinner, side, drink or dessert (§2c). Defaults to DINNER so every recipe
+  /// that existed before the sections did stays where its household left it.
+  kind                RecipeKind       @default(DINNER)
+  /// What it's made of (§2d) — the filter behind "what shall we have?".
+  ///
+  /// Nullable on purpose, and nothing was backfilled. Every recipe that
+  /// predates the question has no honest answer to it: reading the ingredient
+  /// lines would find "kylling" inside "kyllingebouillon" and file a soup as
+  /// meat, or miss the fish sauce and call a curry vegan. An invented dietary
+  /// claim is worse than an absent one, so null means "nobody has said" and is
+  /// shown that way — never as "vegetarian" by omission.
+  category            RecipeCategory?
   /// Where it came from (URL or free text). Optional — pasted plans may lack one.
   source              String?
   /// The method/steps text, captured at parse time for the cooking view (§2).
@@ -57,7 +127,11 @@ model Recipe {
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
 
+  @@unique([id, householdId])
   @@index([isFavorite])
+  @@index([kind])
+  @@index([category])
+  @@index([householdId])
 }
 
 /// One "name / quantity / unit" line belonging to a recipe. Corrected by the
@@ -86,34 +160,44 @@ model IngredientLine {
 /// (leftovers / eating out).
 model WeekPlan {
   id           String        @id @default(cuid())
+  /// The private household whose calendar contains this week.
+  householdId  String
+  household    Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
   /// The Monday of the week (date-only), unique per household.
-  weekStart    DateTime      @unique @db.Date
+  weekStart    DateTime      @db.Date
   slots        DinnerSlot[]
   /// The nights that were decided *not* to need a dinner (§3, §9b).
   nightNotes   NightNote[]
   shoppingList ShoppingList?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+
+  @@unique([householdId, weekStart])
+  @@unique([id, householdId])
+  @@index([householdId])
 }
 
 /// One dinner assigned to a night. A night can hold several (§3); an empty
 /// night simply has no slots. Removing a recipe from the library removes it
 /// from every night it was on (cascade).
 model DinnerSlot {
-  id         String   @id @default(cuid())
-  weekPlanId String
-  weekPlan   WeekPlan @relation(fields: [weekPlanId], references: [id], onDelete: Cascade)
+  id               String    @id @default(cuid())
+  householdId      String
+  household        Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  weekPlanId       String
+  weekPlan         WeekPlan  @relation(fields: [weekPlanId, householdId], references: [id, householdId], onDelete: Cascade)
   /// 0 = Monday … 6 = Sunday.
-  dayOfWeek  Int
-  recipeId   String
-  recipe     Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  dayOfWeek        Int
+  recipeId         String
+  recipe           Recipe    @relation(fields: [recipeId, householdId], references: [id, householdId], onDelete: Cascade)
   /// Per-dinner override of household size for guests / batch-cooking (§4).
   servingsOverride Int?
   /// Orders the dinners within a single night.
-  position   Int      @default(0)
+  position         Int       @default(0)
 
   @@index([weekPlanId, dayOfWeek])
   @@index([recipeId])
+  @@index([householdId])
 }
 
 /// Why a night has no dinner on it (§3).
@@ -214,11 +298,16 @@ model ShoppingListItem {
 /// The household's "things we always have" list. Matched by name against the
 /// shopping list to move items into the pantry section (§5).
 model PantryItem {
-  id      String @id @default(cuid())
-  name    String
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  name        String
   /// Normalized key matched against ShoppingListItem.ingredientKey.
-  nameKey String @unique
-  createdAt DateTime @default(now())
+  nameKey     String
+  createdAt   DateTime  @default(now())
+
+  @@unique([householdId, nameKey])
+  @@index([householdId])
 }
 
 // -----------------------------------------------------------------------------
@@ -228,77 +317,161 @@ model PantryItem {
 /// One grocery trip. Loosely coupled to the shopping list — no item-level
 /// cost attribution (§7).
 model ShoppingTrip {
-  id        String   @id @default(cuid())
-  date      DateTime @db.Date
-  store     String
+  id          String    @id @default(cuid())
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  date        DateTime  @db.Date
+  store       String
   /// The typed-in receipt total.
-  total     Decimal  @db.Money
-  receipt   Receipt?
-  createdAt DateTime @default(now())
+  total       Decimal   @db.Money
+  receipt     Receipt?
+  createdAt   DateTime  @default(now())
 
   @@index([date])
+  @@index([householdId])
 }
 
 /// The receipt photo for a trip, stored in the database (§7). No OCR.
 model Receipt {
-  id       String       @id @default(cuid())
-  tripId   String       @unique
-  trip     ShoppingTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  photo    Bytes
-  mimeType String
-  uploadedAt DateTime   @default(now())
+  id         String       @id @default(cuid())
+  tripId     String       @unique
+  trip       ShoppingTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  photo      Bytes
+  mimeType   String
+  uploadedAt DateTime     @default(now())
 }
 
 // -----------------------------------------------------------------------------
 // Accounts (§9)
 // -----------------------------------------------------------------------------
 
-/// One household member. Accounts exist so sign-in can be revoked per person
-/// and so email has somewhere to go — *not* to isolate data. Every member sees
-/// the same plan, library and ledger.
+enum PlatformRole {
+  USER
+  ADMIN
+}
+
+enum HouseholdRole {
+  MEMBER
+  ADMIN
+}
+
+/// A private collection of plans, recipes, shopping and spending data.
+model Household {
+  id          String                @id @default(cuid())
+  name        String
+  /// Salt mixed into the bookmarklet capture token's HMAC
+  /// (src/lib/auth.ts captureToken), alongside AUTH_SECRET (§1). Not a secret
+  /// standing on its own — Prisma cannot generate an arbitrary random default,
+  /// and `cuid()` is unpredictable enough for a value whose only job is to sit
+  /// inside a keyed HMAC that still needs AUTH_SECRET to forge. What matters is
+  /// that it can be rotated on its own: removing a member, or a platform
+  /// admin's membership intervention, rewrites this to a fresh value, which
+  /// invalidates every capture token issued for this household without
+  /// touching AUTH_SECRET — rotating that would sign every account on the
+  /// installation out to revoke one household's bookmarklet.
+  captureKey  String                @default(cuid())
+  memberships HouseholdMembership[]
+  invitations Invitation[]
+  auditEvents AuditEvent[]
+  recipes     Recipe[]
+  weekPlans   WeekPlan[]
+  pantryItems PantryItem[]
+  trips       ShoppingTrip[]
+  dinnerSlots DinnerSlot[]
+  settings    Settings?
+  newsletters NewsletterSend[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+}
+
+/// A user's role is per household. PlatformRole is deliberately separate:
+/// administering SMTP or backups must not grant routine access to meal data.
+model HouseholdMembership {
+  householdId     String
+  household       Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role            HouseholdRole @default(MEMBER)
+  /// Whether this household's weekly digest reaches this member (§9b).
+  ///
+  /// Per membership rather than per account: someone who cooks in two
+  /// households has two plans, two shopping lists and two reasons to hear
+  /// from us on a Saturday, and wanting one of those mails is not the same
+  /// as wanting both. A single account-wide flag made the one-click
+  /// unsubscribe in a digest footer silence a household the reader never
+  /// meant to leave.
+  newsletterOptIn Boolean       @default(true)
+  activeSessions  Session[]     @relation("ActiveHouseholdMembership")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@id([householdId, userId])
+  @@index([userId])
+}
+
+/// One person who can sign in. Membership determines which private household
+/// data they may use; platformRole is only for operating the installation.
 model User {
-  id             String    @id @default(cuid())
+  id              String                @id @default(cuid())
   /// Lowercased at write time; the login identifier.
-  email          String    @unique
+  email           String                @unique
   /// Display name for greetings in email. Optional — email alone is enough.
-  name           String?
+  name            String?
   /// Scrypt hash (see src/lib/password.ts). Null between being invited and
   /// choosing a password, which is why invited members can't yet sign in.
-  passwordHash   String?
-  /// Weekly digest opt-in (§9b). One-click unsubscribe flips this to false.
-  newsletterOptIn Boolean  @default(true)
-  sessions       Session[]
-  authTokens     AuthToken[]
-  newsletters    NewsletterSend[]
-  lastLoginAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  passwordHash    String?
+  platformRole    PlatformRole          @default(USER)
+  memberships     HouseholdMembership[]
+  sessions        Session[]
+  authTokens      AuthToken[]
+  newsletters     NewsletterSend[]
+  invitationsSent Invitation[]          @relation("InvitationsSent")
+  invitationsUsed Invitation[]          @relation("InvitationsAccepted")
+  auditEvents     AuditEvent[]          @relation("AuditActor")
+  lastLoginAt     DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 }
 
 /// A signed-in browser. Server-side so signing out (or removing a member)
 /// takes effect immediately, unlike a self-contained signed cookie.
 model Session {
-  id        String   @id @default(cuid())
+  id                String               @id @default(cuid())
   /// SHA-256 of the cookie's random token. The raw token is never stored, so
   /// a database leak doesn't hand over live sessions.
-  tokenHash String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  tokenHash         String               @unique
+  userId            String
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// The household this browser is currently acting in. The composite
+  /// relation makes selecting a household without membership impossible.
+  activeHouseholdId String?
+  activeMembership  HouseholdMembership? @relation("ActiveHouseholdMembership", fields: [activeHouseholdId, userId], references: [householdId, userId], onDelete: Cascade)
+  expiresAt         DateTime
+  createdAt         DateTime             @default(now())
   /// Refreshed lazily so an active session slides forward rather than expiring
   /// mid-shop.
-  lastSeenAt DateTime @default(now())
+  lastSeenAt        DateTime             @default(now())
 
   @@index([userId])
+  @@index([activeHouseholdId, userId])
   @@index([expiresAt])
 }
 
-/// What a one-time emailed link is for. Password reset and invitation are the
-/// same mechanism pointed at different copy; MAGIC_LINK is here so passwordless
+/// What a one-time emailed link is for. MAGIC_LINK is here so passwordless
 /// sign-in can be added without a migration.
 enum AuthTokenPurpose {
   PASSWORD_RESET
+  /// Retired in Phase 6. Invitations were once AuthTokens redeemed through
+  /// /reset, which is why this value exists; Phase 4 replaced them with the
+  /// Invitation model and /invite, and nothing has minted or redeemed one
+  /// since. The leftover unspent rows were deleted in migration
+  /// 20260901100000_retire_invite_auth_tokens.
+  ///
+  /// The value itself stays because Postgres cannot drop a member of an enum
+  /// type — there is no ALTER TYPE ... DROP VALUE — so removing it would mean
+  /// rebuilding the type and rewriting every column that uses it, which is a
+  /// great deal of risk to retire a word nothing reads. Treat it as reserved:
+  /// do not reuse it for something new, since old rows may still carry it.
   INVITE
   MAGIC_LINK
 }
@@ -321,28 +494,322 @@ model AuthToken {
   @@index([expiresAt])
 }
 
+/// One fixed window of one rate limit: how many times `subject` has tried
+/// `bucket` since `windowStart` (§9, Phase 6).
+///
+/// In the database rather than in a map in the process, because the limit has
+/// to survive the thing it is protecting against. A password-guessing script
+/// that can restart the container — or simply wait out a deploy — beats an
+/// in-memory counter without noticing it was there, and this app restarts on
+/// every push. It also means the limit is one limit, not one per worker.
+///
+/// A fixed window, not a sliding log, because the question being asked is
+/// "has this address been hammered in the last quarter hour?" and the cheapest
+/// honest answer is a counter with an expiry. The known cost of fixed windows —
+/// twice the nominal rate across a window boundary — is irrelevant at the rates
+/// that matter here, and the alternative stores a row per attempt.
+///
+/// `subject` is hashed rather than stored plainly. The rows are keyed by
+/// exactly the two things worth not writing down: the IP a person is sitting
+/// behind, and the email address they typed into a login form, including the
+/// addresses that turned out not to exist. A hash counts just as well and
+/// leaves a table that says nothing about who was here.
+model RateLimitCounter {
+  id          String   @id @default(cuid())
+  /// Which limit this is — "login:ip", "login:email", "invite:accept:ip".
+  bucket      String
+  /// SHA-256 of the IP address or normalized email being counted.
+  subject     String
+  /// Start of the window these attempts fall in; part of the key, so a new
+  /// window is a fresh insert rather than a read-modify-write of an old one.
+  windowStart DateTime
+  count       Int      @default(0)
+  /// When this row stops meaning anything. Rows are swept opportunistically
+  /// rather than by a scheduler: the limiter deletes what it trips over.
+  expiresAt   DateTime
+
+  @@unique([bucket, subject, windowStart])
+  @@index([expiresAt])
+}
+
+/// Why a link was sent, and therefore what accepting it does (§9).
+///
+/// HOUSEHOLD adds the invitee to an existing household as one of its admins —
+/// the kitchen-sharing case, sent by somebody already in that kitchen.
+/// PLATFORM is the installation saying "you may have a household here": it
+/// belongs to no household yet, and accepting creates one with the invitee as
+/// its first admin.
+///
+/// The distinction is not cosmetic. A household admin may only ever mint the
+/// first kind, and only for their own household; the second is the one that
+/// grows the installation, so it stays with the platform admin (§9, Phase 5).
+enum InvitationKind {
+  HOUSEHOLD
+  PLATFORM
+}
+
+/// A single-use, email-bound, seven-day invitation (§9).
+///
+/// Separate from AuthToken, which invitations used to borrow, because the two
+/// answer different questions. A reset token asks "is this the person who owns
+/// this account?" and therefore presupposes an account. An invitation asks "may
+/// this address join?" and must exist *before* any account or membership does —
+/// the old flow created the user row and the membership at invitation time, so
+/// an unaccepted invitation was indistinguishable from a member who had simply
+/// never logged in, an unrevokable half-member sitting inside a private
+/// household's roster.
+///
+/// Nothing here is a credential the recipient chooses. `tokenHash` is a SHA-256
+/// of the random link token, stored the way session and reset tokens are, so a
+/// database dump hands over no live invitations. `email` is normalized and
+/// checked at acceptance: the link is bound to the mailbox it was sent to, so
+/// forwarding it to somebody else gets them a refusal rather than a household.
+///
+/// Three timestamps rather than a status column, because each one is a fact
+/// with a time attached and a status would be a summary of them that can drift:
+/// `expiresAt` is set at issue, `acceptedAt` is the atomic claim that makes the
+/// link single-use (an `updateMany` filtered on null, exactly as AuthToken
+/// does), and `revokedAt` is an admin changing their mind. Rows are kept after
+/// all three, since who was invited where, by whom, and what became of it is
+/// the audit trail Phase 6 needs.
+model Invitation {
+  id            String         @id @default(cuid())
+  /// SHA-256 of the emailed token. The raw value exists only in the mail.
+  tokenHash     String         @unique
+  /// Lowercased at write time, and the only address that may accept.
+  email         String
+  /// The name the inviter typed, used to greet the invitee and to prefill the
+  /// account they are about to create. Not a promise: they may type another.
+  invitedName   String?
+  kind          InvitationKind
+  /// The household being joined. A PLATFORM invitation has none until it is
+  /// accepted, at which point it records the household it created — a database
+  /// check constraint holds both halves of that.
+  householdId   String?
+  household     Household?     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  /// A name suggested for the household a PLATFORM invitation will create.
+  /// The invitee may replace it; null means they will be asked for one.
+  householdName String?
+  /// Who sent it. Nullable only so removing an admin doesn't erase the record
+  /// of what they did — the invitation outlives the account that issued it.
+  invitedById   String?
+  invitedBy     User?          @relation("InvitationsSent", fields: [invitedById], references: [id], onDelete: SetNull)
+  expiresAt     DateTime
+  /// Set by the atomic claim at acceptance; a set value means spent forever.
+  acceptedAt    DateTime?
+  /// The account that accepted — the invitee's existing account, or the one
+  /// created in the same transaction.
+  acceptedById  String?
+  acceptedBy    User?          @relation("InvitationsAccepted", fields: [acceptedById], references: [id], onDelete: SetNull)
+  /// Set when an admin withdraws it, or when a replacement invitation for the
+  /// same address and target supersedes it.
+  revokedAt     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  /// Answering "is there a live invitation for this address?" — asked on every
+  /// issue, to supersede the previous one, and on every acceptance.
+  @@index([email])
+  @@index([householdId])
+  @@index([expiresAt])
+}
+
 /// One digest delivered to one member for one week. The unique constraint is
 /// the idempotency guard: a cron that fires twice can't send twice (§9b).
 model NewsletterSend {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(cuid())
+  /// Delivery identity includes household because one user may receive a
+  /// separate digest for each household they belong to.
+  householdId String
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// The Monday of the week the digest looks ahead to (date-only).
-  weekStart DateTime @db.Date
-  sentAt    DateTime @default(now())
+  weekStart   DateTime  @db.Date
+  sentAt      DateTime  @default(now())
 
-  @@unique([userId, weekStart])
+  @@unique([householdId, userId, weekStart])
+  @@index([householdId])
   @@index([weekStart])
 }
 
 // -----------------------------------------------------------------------------
-// Settings (§4, §9) — single household-wide row.
+// Audit trail (§9c)
+// -----------------------------------------------------------------------------
+
+/// What was done, by somebody operating the installation rather than cooking
+/// in it (§9c).
+///
+/// Deliberately narrow. This is not a log of everything that happens — it is
+/// the record of the acts that a household could not have performed for
+/// itself and might reasonably want to know about, plus the operational
+/// buttons that touch the whole box. Reading a plan is not here; reaching into
+/// a household's membership from outside is.
+enum AuditAction {
+  /// A platform admin offered somebody a household of their own.
+  PLATFORM_INVITATION_SENT
+  PLATFORM_INVITATION_REVOKED
+  /// A platform admin reached into a household's membership. The two acts the
+  /// intervention view permits, and the reason it exists: a household whose
+  /// admins have deadlocked, or which has lost its last one, cannot fix itself.
+  HOUSEHOLD_ROLE_CHANGED
+  HOUSEHOLD_MEMBER_REMOVED
+  /// Installation-wide operations: proving the relay works, and the backups.
+  SMTP_TEST_SENT
+  SMTP_TEST_FAILED
+  BACKUP_INITIALISED
+  BACKUP_RUN_REQUESTED
+  /// A household admin offering their own kitchen to somebody, and changing
+  /// their mind. The counterpart to the two PLATFORM_ values above: same act,
+  /// different authority, and worth telling apart when reading the trail.
+  HOUSEHOLD_INVITATION_SENT
+  HOUSEHOLD_INVITATION_REVOKED
+  /// Somebody spent a link. The row that closes an invitation's story, and the
+  /// only one written by the person the trail is about rather than an admin.
+  INVITATION_ACCEPTED
+  /// A membership came into existence. HOUSEHOLD_MEMBER_REMOVED above is its
+  /// mirror; a roster you cannot reconstruct is not a roster you can audit.
+  HOUSEHOLD_MEMBER_JOINED
+  /// Credential changes, which is what an account takeover looks like from the
+  /// outside. Requesting a reset is recorded as well as completing one: the
+  /// request is the unauthenticated half, and a burst of them against one
+  /// address is the thing worth seeing.
+  PASSWORD_CHANGED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  /// The login address itself changed. Distinct from PASSWORD_CHANGED even
+  /// though both are gated the same way (current password required): a
+  /// changed address is also what /api/password/forgot mails to next time,
+  /// so it is the more consequential of the two credential changes and the
+  /// one whose row should say, on its own, what the account's address was
+  /// before someone should go looking for it.
+  EMAIL_CHANGED
+  /// A rate limit refused somebody. Not one row per failed password — that
+  /// would be a table of noise — but one when the limiter actually starts
+  /// turning attempts away, which is the point at which somebody should look.
+  AUTH_THROTTLED
+  /// The SSH key this instance authenticates to the backup host with was
+  /// generated or read. Deliberately not the Borg passphrase: that one is
+  /// generated in the browser and typed into .env by hand (§11), and never
+  /// reaches the server at all, so there is no server-side act to record.
+  /// This key is the credential that does cross the boundary, and minting it
+  /// is what grants this box write access to every archive.
+  BACKUP_KEY_ACCESSED
+}
+
+/// One thing somebody did that is worth keeping after the fact (§9c).
+///
+/// It began as a record of platform-admin interventions, and that is still the
+/// sharpest case. Phase 6 widened it to the acts that matter when the app is
+/// reachable from the open internet: invitations, membership changes, password
+/// changes, and the moment a rate limit starts refusing somebody. The common
+/// thread is not who did it but whether anybody would want to reconstruct it
+/// afterwards.
+///
+/// Every field that names somebody or something is stored twice: as a
+/// relation, which is convenient while the row it points at still exists, and
+/// as a plain snapshot of the text, which is what the record is actually made
+/// of. An audit trail that empties itself when an account is deleted or a
+/// household is wound up is not an audit trail — and the moment you most want
+/// to read one is exactly the moment somebody has been removed.
+///
+/// That is also why there is no update path and nothing here is nullable for
+/// convenience: rows are written once, by src/lib/audit.ts, and never edited.
+model AuditEvent {
+  id            String      @id @default(cuid())
+  action        AuditAction
+  /// Who was responsible. Null for something the box did to itself — a
+  /// scheduled backup answering CRON_SECRET — and for the unauthenticated
+  /// acts, where there is by definition no established identity to name.
+  actorId       String?
+  actor         User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /// Snapshot of who they were, which outlives the account.
+  actorEmail    String?
+  /// The household acted on, where there was one.
+  householdId   String?
+  household     Household?  @relation(fields: [householdId], references: [id], onDelete: SetNull)
+  householdName String?
+  /// The person acted on — invited, removed, promoted.
+  subjectEmail  String?
+  /// One sentence saying what happened, written at the point it happened,
+  /// where the surrounding context is still known. Reconstructing it later
+  /// from the enum and three ids produces something much vaguer.
+  detail        String
+  createdAt     DateTime    @default(now())
+
+  @@index([createdAt])
+  @@index([householdId])
+  @@index([actorId])
+}
+
+// -----------------------------------------------------------------------------
+// Backups (§11)
+// -----------------------------------------------------------------------------
+
+/// What set a backup going: the app's own schedule, or somebody pressing the
+/// button on the settings screen.
+enum BackupTrigger {
+  SCHEDULED
+  MANUAL
+}
+
+/// One attempt at a backup — successful or not (§11).
+///
+/// Recorded for two reasons, and the second is the important one.
+///
+/// The scheduler compares `day` against the day the schedule says is owed,
+/// which is what turns a fifteen-minute tick into one backup a night rather
+/// than ninety. Failures are rows too, so a run that failed at three is
+/// retried at quarter past rather than written off until tomorrow.
+///
+/// And a household can *see* it. The specific way backups fail is silently:
+/// the archives stop and everything looks exactly as it did, until the day
+/// somebody needs one. A visible "backed up 6 hours ago" — or "last succeeded
+/// nine days ago" — is the difference between finding that out on a Tuesday
+/// and finding it out on the worst day of the year.
+///
+/// Deliberately no unique constraint on `day`: a household may back up by hand
+/// as often as it likes, and the scheduled run's idempotence comes from asking
+/// whether the owed day already has a successful row.
+model BackupRun {
+  id              String        @id @default(cuid())
+  /// The local calendar day (in BACKUP_TIMEZONE) this run satisfies.
+  day             DateTime      @db.Date
+  trigger         BackupTrigger @default(SCHEDULED)
+  startedAt       DateTime      @default(now())
+  /// Null while a run is in flight — and left null forever if the box was
+  /// rebooted mid-backup, which is how such a row is recognised later.
+  finishedAt      DateTime?
+  ok              Boolean       @default(false)
+  /// Archive name in the repository — what a restore passes to `borg extract`.
+  archive         String?
+  /// Sizes as borg reported them: the dump, its compressed form, and what this
+  /// archive actually added to the repository. BigInt because a household's
+  /// receipt photos will outgrow a 32-bit count of bytes long before anything
+  /// else here matters.
+  originalBytes   BigInt?
+  compressedBytes BigInt?
+  dedupedBytes    BigInt?
+  /// The diagnosis for a failed run, already redacted of the passphrase.
+  error           String?
+  /// Complaints from a run that did produce an archive — a prune that couldn't
+  /// get the lock, say. The backup is safe; something still wants reading.
+  warnings        String?
+
+  @@index([day])
+  @@index([startedAt])
+}
+
+// -----------------------------------------------------------------------------
+// Settings (§4, §9) — one row per household after route scoping is complete.
 // -----------------------------------------------------------------------------
 
 model Settings {
-  /// Singleton row; always id = 1.
-  id            Int @id @default(1)
+  id            Int       @id @default(autoincrement())
+  /// Exactly one settings row per household.
+  householdId   String    @unique
+  household     Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
   /// Default servings every recipe scales to (§4).
-  householdSize Int @default(2)
-  updatedAt     DateTime @updatedAt
+  householdSize Int       @default(2)
+  updatedAt     DateTime  @updatedAt
 }

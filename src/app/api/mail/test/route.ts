@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/currentUser";
+import { guardOperational } from "@/lib/opsGuard";
+import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 import { isMailConfigured, verifyMailConnection } from "@/lib/mail";
 import { describeMailError } from "@/lib/mailError";
 
@@ -13,8 +15,21 @@ import { describeMailError } from "@/lib/mailError";
  * looking at this screen is the person who can go and fix the setting.
  */
 export async function POST() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // SMTP belongs to the installation, and the diagnosis it returns is the
+  // real one — hostnames, ports, what the relay said. That is worth showing to
+  // whoever can go and change the setting, and to nobody else.
+  const guard = await guardOperational();
+  if (!guard.ok) return guard.response;
+  const actor = guard.user;
+  if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  // This route has no bearer door (guardOperational() is called with no
+  // options above), so `actor` is always the signed-in platform admin who
+  // pressed the button — never a script. Keyed by that account: the limit is
+  // "how many times can one admin lean on this button", not a defence against
+  // guessing anything.
+  const refusal = await consumeAll([["mail-test:user", actor.id]]);
+  if (refusal) return tooManyRequests(refusal);
 
   if (!isMailConfigured()) {
     const missing = [
@@ -22,6 +37,12 @@ export async function POST() {
       !process.env.MAIL_FROM && "MAIL_FROM",
       !process.env.APP_URL && "APP_URL",
     ].filter(Boolean);
+
+    await recordAudit({
+      action: "SMTP_TEST_FAILED",
+      actor: { id: actor.id, email: actor.email },
+      detail: `Checked the SMTP settings; configuration was incomplete (${missing.join(", ")} missing).`,
+    });
 
     return NextResponse.json({
       ok: false,
@@ -43,6 +64,11 @@ export async function POST() {
 
   try {
     await verifyMailConnection();
+    await recordAudit({
+      action: "SMTP_TEST_SENT",
+      actor: { id: actor.id, email: actor.email },
+      detail: `Checked the SMTP settings against ${settings.host}:${settings.port}; the relay accepted the connection.`,
+    });
     return NextResponse.json({
       ok: true,
       summary: `Connected to ${settings.host}:${settings.port} and authenticated.`,
@@ -50,6 +76,11 @@ export async function POST() {
     });
   } catch (err) {
     console.error("smtp verify failed", err);
+    await recordAudit({
+      action: "SMTP_TEST_FAILED",
+      actor: { id: actor.id, email: actor.email },
+      detail: `Checked the SMTP settings against ${settings.host}:${settings.port}; the connection or authentication failed.`,
+    });
     return NextResponse.json({
       ok: false,
       ...describeMailError(err, settings.host),

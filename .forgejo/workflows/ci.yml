@@ -27,5 +27,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # borg lets src/lib/borg.integration.test.mjs actually run: it creates a
+      # scratch repository, writes an encrypted archive, reads it back and
+      # prunes it. Without borg that file skips itself, and the argument lists
+      # the nightly backup depends on would only ever be checked against
+      # themselves.
+      - name: Install borg
+        run: apt-get update && apt-get install -y --no-install-recommends borgbackup
+
       - name: Test
         run: npm test

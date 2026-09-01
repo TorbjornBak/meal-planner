@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MailDiagnosis, type Diagnosis } from "./MailDiagnosis";
+import { DiagnosisPanel, type Diagnosis } from "./Diagnosis";
 
 /**
  * Your own account (§9) — name, email, password, and the weekly digest
@@ -13,8 +13,10 @@ interface Account {
   id: string;
   email: string;
   name: string | null;
+  household: { id: string; name: string; newsletterOptIn: boolean } | null;
   newsletterOptIn: boolean;
   mailConfigured: boolean;
+  isPlatformAdmin: boolean;
 }
 
 export function AccountCard() {
@@ -22,6 +24,10 @@ export function AccountCard() {
   const [account, setAccount] = useState<Account | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  // Only asked for, and only sent, when the address field no longer matches
+  // the account's current one — the server enforces the same thing, this
+  // just avoids showing a password box on every ordinary "change my name" save.
+  const [emailPassword, setEmailPassword] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,13 +52,25 @@ export function AccountCard() {
       .catch(() => {});
   }, []);
 
+  // Whether the address field has actually been edited away from what's on
+  // the account — the same test the server applies, mirrored here purely to
+  // decide whether to show and require the password box below.
+  const emailChanging = account !== null && email.trim().toLowerCase() !== account.email;
+
   async function saveProfile() {
     setError(null);
     setNote(null);
     const res = await fetch("/api/account", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, email }),
+      body: JSON.stringify({
+        name,
+        email,
+        // Sent only alongside a real address change; the server ignores it
+        // otherwise, but there's no reason to hand over a password when
+        // nothing here requires proving it.
+        ...(emailChanging ? { currentPassword: emailPassword } : {}),
+      }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -61,10 +79,17 @@ export function AccountCard() {
           ? "Another member already uses that address."
           : body.error === "invalid-email"
             ? "That doesn't look like an email address."
-            : "Couldn't save that.",
+            : body.error === "password-required"
+              ? "Enter your current password to change your login address."
+              : body.error === "wrong-password"
+                ? "That isn't your current password."
+                : body.error === "too-many-requests"
+                  ? "Too many attempts. Try again later."
+                  : "Couldn't save that.",
       );
       return;
     }
+    setEmailPassword("");
     setAccount((a) => (a ? { ...a, ...body } : a));
     setNote("Saved.");
   }
@@ -174,6 +199,24 @@ export function AccountCard() {
           />
         </label>
 
+        {emailChanging && (
+          <label style={{ display: "block", marginTop: 12 }}>
+            Current password
+            <input
+              type="password"
+              value={emailPassword}
+              onChange={(e) => setEmailPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+              style={{ display: "block", marginTop: 4, width: "100%", maxWidth: 320 }}
+            />
+            <span className="muted" style={{ display: "block", fontSize: "0.85em", marginTop: 4 }}>
+              Needed to change your login address. A notice goes to your current address,
+              {account.email}, in case this wasn&apos;t you.
+            </span>
+          </label>
+        )}
+
         <p style={{ marginTop: 12 }}>
           <button onClick={saveProfile}>Save</button>{" "}
           <button className="muted" onClick={signOut}>
@@ -225,7 +268,16 @@ export function AccountCard() {
       <div className="card">
         <h2>Weekly email</h2>
         <p className="muted">
-          Once a week: the coming week&apos;s dinners and any recipes added to the library.
+          Once a week: the coming week&apos;s dinners and any recipes added to the library
+          {account.household ? (
+            <>
+              {" "}
+              — for <strong>{account.household.name}</strong>. This is set per household, so it
+              follows whichever one you&apos;re currently in, not your account as a whole.
+            </>
+          ) : (
+            "."
+          )}
         </p>
 
         <label style={{ display: "block", marginTop: 8 }}>
@@ -234,7 +286,7 @@ export function AccountCard() {
             checked={account.newsletterOptIn}
             onChange={(e) => toggleNewsletter(e.target.checked)}
           />{" "}
-          Email me the weekly plan
+          Email me {account.household ? `${account.household.name}'s` : "the"} weekly plan
         </label>
 
         {account.mailConfigured ? (
@@ -243,10 +295,15 @@ export function AccountCard() {
               {previewing ? "Sending…" : "Send me one now"}
             </button>{" "}
             {/* Connects and authenticates without sending, so a failure here
-                separates "can't reach the server" from "message refused". */}
-            <button className="muted" onClick={testMail} disabled={testing}>
-              {testing ? "Checking…" : "Test connection"}
-            </button>
+                separates "can't reach the server" from "message refused". This
+                is diagnosing the box's SMTP setup, not any one member's mail,
+                so it now belongs to /api/mail/test's platform-admin guard —
+                offering it to everyone else would just be a button that 403s. */}
+            {account.isPlatformAdmin && (
+              <button className="muted" onClick={testMail} disabled={testing}>
+                {testing ? "Checking…" : "Test connection"}
+              </button>
+            )}
           </p>
         ) : (
           <p className="muted" style={{ marginTop: 12, fontSize: "0.85em" }}>
@@ -255,7 +312,7 @@ export function AccountCard() {
           </p>
         )}
 
-        {mailCheck && <MailDiagnosis d={mailCheck} ok={mailCheck.ok} />}
+        {mailCheck && <DiagnosisPanel d={mailCheck} ok={mailCheck.ok} />}
       </div>
     </>
   );

@@ -17,6 +17,7 @@ import type { ParsedRecipe } from "./parse";
  * (the import route parses first to confirm there's a recipe before saving).
  */
 export async function createRecipeFromHtml(
+  householdId: string,
   html: string,
   pageUrl?: string | null,
   draft?: ParsedRecipe,
@@ -27,7 +28,7 @@ export async function createRecipeFromHtml(
   // hotlinking. Best-effort: a missing or unreachable image never fails the
   // save — you can always add one by hand on the edit page.
   const rawImageUrl = extractRecipeImageUrl(html);
-  const imageUrl = rawImageUrl ? resolvePublicUrl(rawImageUrl, pageUrl) : null;
+  const imageUrl = rawImageUrl ? await resolvePublicUrl(rawImageUrl, pageUrl) : null;
   const image = imageUrl ? await fetchImage(imageUrl) : null;
 
   // How long it takes (§2), best source first: the page's own schema.org
@@ -43,6 +44,7 @@ export async function createRecipeFromHtml(
 
   return prisma.recipe.create({
     data: {
+      householdId,
       name: parsed.name,
       source: pageUrl ?? parsed.source ?? null,
       instructions: parsed.instructions ?? null,

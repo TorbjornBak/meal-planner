@@ -61,8 +61,8 @@ services:
       # Absolute base for links in email — emails are read away from the app,
       # so there's no request to infer an origin from. Your MagicDNS name (§10).
       APP_URL: ${APP_URL:-}
-      # Bearer token for triggering a send by hand, e.g. to re-run one week
-      # (§9b). The scheduled send no longer needs it.
+      # Required in production: bearer token for operational backup and manual
+      # newsletter runs. Replace the public example from .env.example.
       CRON_SECRET: ${CRON_SECRET:-}
       # The weekly digest schedules itself in-process (§9b) — there is no
       # crontab to keep. Friday 17:00 Europe/Copenhagen unless overridden.
@@ -71,9 +71,39 @@ services:
       DIGEST_TIMEZONE: ${DIGEST_TIMEZONE:-Europe/Copenhagen}
       # "off" to stop the app sending it at all.
       DIGEST_SCHEDULER: ${DIGEST_SCHEDULER:-on}
+      # Backups (§11) — nightly Borg archives of the database.
+      #
+      # Both are required in production. With them set, the app backs up
+      # nightly and reports whether it worked on the settings screen.
+      #
+      # BORG_PASSPHRASE is the only thing that can decrypt the archives, so it
+      # has to be written down somewhere that isn't this box. It deliberately
+      # never reaches the database — the one it would be needed to restore.
+      BORG_REPO: ${BORG_REPO:-}
+      BORG_PASSPHRASE: ${BORG_PASSPHRASE:-}
+      # Wall clock in BACKUP_TIMEZONE, so it doesn't drift when the clocks change.
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Europe/Copenhagen}
+      # "off" to stop the app backing up on its own; the button still works.
+      BACKUP_SCHEDULER: ${BACKUP_SCHEDULER:-on}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-6}
+      # Set to the same thing the app computes for itself, so that borg run by
+      # hand inside the container — `docker compose exec app borg list` — finds
+      # the key and the known_hosts the nightly backup uses. That is also the
+      # first half of a restore; see README.
+      BORG_RSH: "ssh -i /var/lib/mealplanner/ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/var/lib/mealplanner/ssh/known_hosts"
+      BORG_BASE_DIR: /var/lib/mealplanner/borg
       # The container is UTC otherwise, which would make every local time in
       # the logs an hour or two out from the household's clocks.
       TZ: ${TZ:-Europe/Copenhagen}
+    volumes:
+      # The backup identity and borg's deduplication cache (§11). Has to
+      # outlive the container: the key because the storage box has been told to
+      # trust it, and the cache because without it every night's backup starts
+      # by re-reading the whole repository.
+      - backupstate:/var/lib/mealplanner
     ports:
       # Loopback-only; `tailscale serve` on the host proxies this to the tailnet
       # over HTTPS. Not reachable from the LAN.
@@ -81,3 +111,4 @@ services:
 
 volumes:
   pgdata:
+  backupstate:

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { weeklyBuckets } from "@/lib/spending";
 import { WeeklySpendChart } from "@/components/WeeklySpendChart";
+import { RecipeSuggestions } from "@/components/RecipeSuggestions";
+import { requireHouseholdContext } from "@/lib/currentUser";
 
 // Reads live data behind the shared-session gate — never statically rendered.
 export const dynamic = "force-dynamic";
@@ -11,9 +13,13 @@ function money(n: number): string {
 }
 
 export default async function DashboardPage() {
+  const { household } = await requireHouseholdContext();
   const [recipeCount, trips] = await Promise.all([
-    prisma.recipe.count(),
-    prisma.shoppingTrip.findMany({ orderBy: { date: "asc" } }),
+    prisma.recipe.count({ where: { householdId: household.id } }),
+    prisma.shoppingTrip.findMany({
+      where: { householdId: household.id },
+      orderBy: { date: "asc" },
+    }),
   ]);
 
   const rows = trips.map((t) => ({ date: t.date, total: Number(t.total) }));
@@ -42,6 +48,11 @@ export default async function DashboardPage() {
           <strong style={{ fontSize: "2em" }}>{money(monthTotal)}</strong>
         </div>
       </div>
+
+      {/* Above the spending, deliberately. This is the screen you open in the
+          late afternoon with nothing decided (§2e); what the month has cost is
+          a thing you look up, not a thing you are asked. */}
+      <RecipeSuggestions />
 
       <div className="card">
         <h2>Weekly spend</h2>

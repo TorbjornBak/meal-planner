@@ -5,6 +5,7 @@ import {
   transferFilename,
   type RecipeRowForTransfer,
 } from "@/lib/recipeTransfer";
+import { currentHouseholdContext } from "@/lib/currentUser";
 
 /**
  * GET /api/recipes/export — the whole library as one JSON file (§2, §12).
@@ -27,17 +28,22 @@ import {
  * entire library in a single response.
  */
 export async function GET() {
+  const context = await currentHouseholdContext();
+  if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   // Selected field by field rather than omitting blobs, so the photo columns
   // can't arrive by accident. `toTransferRecipe` drops them anyway, but a
   // query that never loads megabytes of image bytes is the cheaper mistake to
   // not make.
   const rows: RecipeRowForTransfer[] = await prisma.recipe.findMany({
+    where: { householdId: context.household.id },
     // By name, not by creation date: the natural thing to do with an export is
     // take another one next month and compare, and a stable order makes that a
     // readable diff instead of a reshuffle.
     orderBy: { name: "asc" },
     select: {
       name: true,
+      kind: true,
+      category: true,
       source: true,
       statedServings: true,
       instructions: true,

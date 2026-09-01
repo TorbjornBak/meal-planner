@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AccountCard } from "./AccountCard";
+import { BackupCard } from "./BackupCard";
 import { HouseholdCard } from "./HouseholdCard";
 
-// Settings (§4, §9) — household size (scales every recipe), your own account,
-// and who else is in the household. The pantry list (§5) has its own page; all
-// that lives here is the way in.
+// Settings (§4, §9, §11) — household size (scales every recipe), your own
+// account, who else is in the household, and whether any of it is backed up.
+// The pantry list (§5) has its own page; all that lives here is the way in.
 
 export default function SettingsPage() {
   const [householdSize, setHouseholdSize] = useState<number | "">("");
@@ -37,11 +38,13 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((d) => {
         const origin = window.location.origin;
-        const code = `javascript:(function(){var t=${JSON.stringify(
+        const code = `javascript:(function(){var h=${JSON.stringify(
+          d.householdId,
+        )},t=${JSON.stringify(
           d.token,
         )},b=${JSON.stringify(
           origin,
-        )};fetch(b+'/api/capture',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({token:t,url:location.href,html:document.documentElement.outerHTML})}).then(function(r){return r.json()}).then(function(x){if(x&&x.id){if(confirm('Saved to MealPlanner. Open to review?'))location.href=b+'/recipes/'+x.id+'/edit'}else{alert('Capture failed: '+((x&&x.error)||'unknown'))}}).catch(function(e){alert('Capture failed: '+e)})})();`;
+        )};fetch(b+'/api/capture',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({householdId:h,token:t,url:location.href,html:document.documentElement.outerHTML})}).then(function(r){return r.json()}).then(function(x){if(x&&x.id){if(confirm('Saved to MealPlanner. Open to review?'))location.href=b+'/recipes/'+x.id+'/edit'}else{alert('Capture failed: '+((x&&x.error)||'unknown'))}}).catch(function(e){alert('Capture failed: '+e)})})();`;
         setBookmarklet(code);
       });
   }, []);
@@ -236,6 +239,7 @@ export default function SettingsPage() {
 
       <AccountCard />
       <HouseholdCard />
+      <BackupCard />
     </>
   );
 }

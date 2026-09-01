@@ -133,6 +133,128 @@ table {
   border-collapse: collapse;
 }
 
+/* --- Recipe sections: dinners / sides / desserts / drinks (§2c) ------------- */
+
+/* An underlined tab strip rather than pill buttons: the sections are views of
+   one list, and the list starts immediately below them.
+
+   Wrapping rather than scrolling sideways, now that there are four of them and
+   they no longer fit a phone: a tab that has scrolled off the edge is a section
+   nobody knows exists, and this strip is the only route to three of them. A
+   second row is ugly for one week and then you know where the desserts are. */
+.recipe-kind-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin: 0.5rem 0 1rem;
+}
+.recipe-kind-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
+  cursor: pointer;
+  color: inherit;
+  /* Sits on the container's border rather than above it, so the selected tab
+     joins the content instead of floating over a line. */
+  margin-bottom: -1px;
+}
+.recipe-kind-tab.is-selected {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.recipe-kind-tab .muted {
+  font-weight: 400;
+  font-size: 0.85em;
+}
+
+/* --- Recipe categories (§2d) ------------------------------------------------ */
+
+/* Pills rather than a <select>, because the whole point is to be pressable
+   without first being opened: on the dashboard this row is the question
+   ("fish? something vegetarian?") and pressing it is the answer. It is a real
+   <select> nowhere, so the same row works on a phone at the fridge. */
+.category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.category-filter {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.category-filter:hover {
+  border-color: var(--accent);
+}
+/* aria-pressed carries the state, so the styling hangs off the same attribute
+   a screen reader reads — they can't drift apart. */
+.category-filter[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The badge on a recipe. Quieter than the filter pills: it states a fact you
+   already chose, rather than offering one. */
+.recipe-category {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+/* --- Dashboard suggestions (§2e) -------------------------------------------- */
+
+.suggest-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.suggest-head h2 {
+  margin: 0;
+}
+.suggest-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+.suggest-row {
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--border);
+  /* The action sits beside the name on a wide screen and drops under it on a
+     phone, where 72px of thumbnail plus a button leaves the name no room. */
+  flex-wrap: wrap;
+}
+.suggest-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.suggest-why {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+  font-size: 0.9em;
+}
+.suggest-action {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+}
+
 /* --- Recipe photos --------------------------------------------------------- */
 
 .recipe-hero {
@@ -534,6 +656,21 @@ table {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
+/* What it is, when it isn't a dinner (§2c). A quiet outlined tag rather than a
+   coloured badge: it is a qualifier on the name it follows, not a second thing
+   to read, and the row's job is still to be scanned for the name. */
+.picker-option-kind {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  font-size: 0.75em;
+  font-weight: 400;
+  vertical-align: 0.05em;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
 /* Why the recipe turned up: the ingredients the query actually matched. */
 .picker-why {
   font-size: 0.85em;
