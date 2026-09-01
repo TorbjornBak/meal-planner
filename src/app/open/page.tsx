@@ -52,7 +52,9 @@ export default async function OpenPage({
    * origin too, and a digest link is exactly the kind of long-lived URL
    * somebody would craft to exploit that.
    */
-  const destination = safeNextPath(next, appOrigin());
+  // Falls back to the dashboard, not safeNextPath's "/": a digest link
+  // that arrived with no `next` at all is still a link into the app.
+  const destination = safeNextPath(next, appOrigin(), "/dashboard");
 
   if (h) {
     const jar = await cookies();
@@ -66,7 +68,7 @@ export default async function OpenPage({
             were. Nothing has changed about the one you are in.
           </p>
           <p style={{ marginTop: 16 }}>
-            <Link href="/">Go to the dashboard</Link>
+            <Link href="/dashboard">Go to the dashboard</Link>
           </p>
         </div>
       );

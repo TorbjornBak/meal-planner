@@ -1,17 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import Link from "next/link";
 import "./globals.css";
 import { ServiceWorkerRegistrar } from "./sw-register";
-import { HouseholdSwitcher } from "@/components/HouseholdSwitcher";
-import { AdminNavLink } from "@/components/AdminNavLink";
+import { TopNav } from "@/components/TopNav";
 
 /**
  * Forces every page through per-request rendering rather than Next's static
  * optimization (Phase 6). This has nothing to do with session data — every
  * component in this tree that needs the session fetches it client-side
  * precisely so this layout can stay a plain server component (see the
- * docstrings on HouseholdSwitcher and AdminNavLink) — and everything to do
- * with src/middleware.ts's CSP nonce. That nonce is minted fresh per request
+ * docstrings on TopNav, HouseholdSwitcher and AdminNavLink) — and everything
+ * to do with src/middleware.ts's CSP nonce. That nonce is minted fresh per request
  * and is only correct if the HTML Next emits for *this* request's inline
  * bootstrap script carries *this* request's nonce; a statically-generated
  * page would bake in whichever nonce happened to be current at build (or
@@ -45,17 +43,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <ServiceWorkerRegistrar />
-        <nav className="topnav">
-          <Link href="/">Dashboard</Link>
-          <Link href="/plan">Plan</Link>
-          <Link href="/recipes">Recipes</Link>
-          <Link href="/shopping">Shopping</Link>
-          <Link href="/pantry">Pantry</Link>
-          <Link href="/spending">Spending</Link>
-          <Link href="/settings">Settings</Link>
-          <AdminNavLink />
-          <HouseholdSwitcher />
-        </nav>
+        <TopNav />
         <main className="container">{children}</main>
       </body>
     </html>
