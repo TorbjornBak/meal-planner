@@ -1,0 +1,32 @@
+-- Delete the leftover unspent INVITE AuthToken rows (§9, Phase 6).
+--
+-- Before the Invitation model existed, a household invitation was minted as
+-- an AuthToken with purpose INVITE and redeemed through /reset/[token], the
+-- same page and the same /api/password/reset endpoint a password reset uses.
+-- Phase 4 replaced that with the Invitation model — a hashed token bound to
+-- one address, with its own revoke-on-reissue and accept-once semantics — and
+-- /invite/[token]. Nothing has minted an INVITE AuthToken since that change,
+-- and this migration removes the last code that could ever have redeemed one:
+-- /api/password/reset no longer accepts a `purpose` from the caller (it always
+-- redeems PASSWORD_RESET), and /reset/[token] no longer looks an INVITE token
+-- up at all.
+--
+-- What's left in the table is whatever INVITE rows were sitting unredeemed at
+-- the moment the old scheme was retired: dead credentials that nothing left in
+-- the app can spend. Their holders are not stranded by deleting them. A User
+-- row created by that scheme either already has a password — nothing to do —
+-- or has passwordHash IS NULL, and /api/password/forgot issues a reset link
+-- for a user regardless of whether passwordHash is set (verified by reading
+-- src/app/api/password/forgot/route.ts and src/lib/auth.ts issueAuthToken,
+-- which does not look at the field at all). The forgot-password link is still
+-- a way in for exactly the account this delete touches.
+--
+-- Already-*used* INVITE rows are left alone: a spent token is history of
+-- something that already happened, not a live credential, and deleting it
+-- would be tidying, not safety.
+--
+-- Postgres cannot drop a value from an enum, so AuthTokenPurpose.INVITE stays
+-- in the type, and is marked retired in schema.prisma. Treat it as reserved
+-- rather than free: already-used rows still carry it, so reusing the word for
+-- something new would silently reinterpret that history.
+DELETE FROM "AuthToken" WHERE "purpose" = 'INVITE' AND "usedAt" IS NULL;

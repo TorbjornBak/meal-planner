@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
+import { receiptPhotoProblem } from "@/lib/receiptPhoto";
 
 // Edit / delete a logged shopping trip (§7). PATCH takes the same multipart form
 // as POST /api/trips so the client can reuse it: any of date / store / total,
@@ -57,8 +58,15 @@ export async function PATCH(
   if (String(form.get("removePhoto")) === "1") {
     await prisma.receipt.deleteMany({ where: { tripId: id } });
   } else if (photo instanceof File && photo.size > 0) {
+    // Same guard as the upload on POST /api/trips, for the same reason: a
+    // replacement photo reaches the same served-from-our-own-origin path as
+    // an original one (§7, and src/lib/receiptPhoto.ts).
+    const problem = receiptPhotoProblem(photo);
+    if (problem) {
+      return NextResponse.json({ error: problem }, { status: 413 });
+    }
     const bytes = Buffer.from(await photo.arrayBuffer());
-    const mimeType = photo.type || "application/octet-stream";
+    const mimeType = photo.type;
     await prisma.receipt.upsert({
       where: { tripId: id },
       create: { tripId: id, photo: bytes, mimeType },

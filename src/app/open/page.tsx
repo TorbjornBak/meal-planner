@@ -2,6 +2,23 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { SESSION_COOKIE, selectSessionHousehold } from "@/lib/auth";
+import { safeNextPath } from "@/lib/safeRedirect";
+
+/**
+ * The origin every digest link is measured against.
+ *
+ * APP_URL is what built the link in the first place (src/lib/mail.ts requires
+ * it to send at all), so it is the honest yardstick here. The literal fallback
+ * is never navigated to — it exists so an unparsable APP_URL makes safeNextPath
+ * refuse everything off-path rather than throw on a request somebody is making.
+ */
+function appOrigin(): string {
+  try {
+    return new URL(process.env.APP_URL ?? "").origin;
+  } catch {
+    return "https://mealplanner.invalid";
+  }
+}
 
 /**
  * Open a page *in* a particular household (§9, §9b).
@@ -25,13 +42,17 @@ export default async function OpenPage({
   const { h, next } = await searchParams;
 
   /**
-   * Only same-site paths, and never protocol-relative ones.
+   * Only same-site paths.
    *
    * `next` arrives from a URL that has been sitting in somebody's inbox, so
    * "//evil.example/x" — a valid relative URL that browsers read as another
-   * origin — has to be refused here rather than handed to redirect().
+   * origin — has to be refused here rather than handed to redirect(). The
+   * rule lives in safeNextPath because refusing protocol-relative paths is
+   * not sufficient on its own: a browser reads `/\evil.example` as another
+   * origin too, and a digest link is exactly the kind of long-lived URL
+   * somebody would craft to exploit that.
    */
-  const destination = next && /^\/(?!\/)/.test(next) ? next : "/";
+  const destination = safeNextPath(next, appOrigin());
 
   if (h) {
     const jar = await cookies();

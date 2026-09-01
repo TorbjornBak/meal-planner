@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { extractRecipeImageUrl } from "@/lib/html";
 import { fetchImage, normalizeMime, resolvePublicUrl } from "@/lib/image";
+import { fetchPageHtml } from "@/lib/fetchPage";
 import { MAX_IMAGE_BYTES } from "@/lib/recipeImage";
 import { currentHouseholdContext } from "@/lib/currentUser";
 
@@ -34,9 +35,20 @@ export async function GET(
   }
 
   // We know where the photo lives but hold no bytes — the download failed at
-  // capture time, or the recipe predates image support. Hotlink as a fallback.
+  // capture time, or the recipe predates image support. Hotlink as a
+  // fallback, but re-run the same private-network guard every other outbound
+  // URL in this app gets immediately before using it, rather than trusting a
+  // check done once at write time. `imageUrl` was already run through
+  // `resolvePublicUrl` by both writers (`imageFromSource` below and
+  // `createRecipeFromHtml`), but DNS is not a fact fixed at the moment it was
+  // saved — a host that resolved to a public address then can resolve
+  // somewhere this server refuses to fetch (the household's own tailnet, its
+  // loopback) by the time somebody opens the recipe, same as the redirect
+  // hop this module already re-checks in `guardedFetch`. A stale/rebound
+  // target is quietly treated as "no image" rather than followed.
   if (recipe?.imageUrl) {
-    return NextResponse.redirect(recipe.imageUrl, 302);
+    const target = await resolvePublicUrl(recipe.imageUrl);
+    if (target) return NextResponse.redirect(target, 302);
   }
 
   return NextResponse.json({ error: "no image" }, { status: 404 });
@@ -71,6 +83,16 @@ export async function POST(
   let imageUrl: string | null = null;
 
   if (uploadMime) {
+    // Fail on the client's own Content-Length before reading the body, so an
+    // honestly-labelled oversized upload doesn't cost us a buffered copy of
+    // it first. Not a substitute for the byte-length check below — a client
+    // can always lie about, or omit, this header — just cheaper for the
+    // common case of a browser upload that reports its size correctly.
+    const declared = Number(req.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) {
+      return NextResponse.json({ error: "image too large" }, { status: 413 });
+    }
+
     bytes = Buffer.from(await req.arrayBuffer());
     mime = uploadMime;
     if (bytes.byteLength === 0) {
@@ -132,39 +154,24 @@ async function imageFromSource(
   sourceHtml: string | null,
   source: string | null,
 ): Promise<{ bytes: Buffer; mime: string; imageUrl: string } | null> {
-  const pageUrl = source ? resolvePublicUrl(source) : null;
+  const pageUrl = source ? await resolvePublicUrl(source) : null;
 
   let html = sourceHtml;
   if (!html && pageUrl) {
     // The one case where we fetch a recipe page ourselves rather than having
     // your browser hand it to us (§1). It only happens when you ask for it,
-    // on a recipe you already saved with a link.
-    html = await fetchHtml(pageUrl);
+    // on a recipe you already saved with a link. This used to be a second,
+    // ad hoc `fetch` here with none of `fetchPageHtml`'s guarantees — no
+    // redirect re-checking, no size cap — so it's the same call the
+    // paste-a-URL import makes rather than a hand-rolled copy of it.
+    html = (await fetchPageHtml(pageUrl))?.html ?? null;
   }
   if (!html) return null;
 
   const raw = extractRecipeImageUrl(html);
-  const imageUrl = raw ? resolvePublicUrl(raw, pageUrl) : null;
+  const imageUrl = raw ? await resolvePublicUrl(raw, pageUrl) : null;
   if (!imageUrl) return null;
 
   const image = await fetchImage(imageUrl);
   return image ? { ...image, imageUrl } : null;
-}
-
-async function fetchHtml(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        "user-agent": "MealPlanner/1.0 (household recipe app)",
-        accept: "text/html",
-      },
-    });
-    if (!res.ok) return null;
-    if (!/text\/html/i.test(res.headers.get("content-type") ?? "")) return null;
-    return await res.text();
-  } catch {
-    return null;
-  }
 }

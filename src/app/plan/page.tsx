@@ -109,7 +109,11 @@ function weekLabel(weekStart: string): string {
   const start = new Date(`${weekStart}T00:00:00Z`);
   const end = new Date(`${addDays(weekStart, 6)}T00:00:00Z`);
   const month = (d: Date) =>
-    d.toLocaleDateString(undefined, { month: "long", timeZone: "UTC" });
+    // The interface is English, and the server and browser may not share a
+    // locale. Leaving this implicit makes the server emit "September" while
+    // a Danish browser hydrates it as "september", forcing React to discard
+    // and rebuild the calendar on every load.
+    d.toLocaleDateString("en", { month: "long", timeZone: "UTC" });
 
   return month(start) === month(end)
     ? `${start.getUTCDate()}–${end.getUTCDate()} ${month(end)}`

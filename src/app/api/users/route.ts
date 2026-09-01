@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
 import { memberRemovalRefusal } from "@/lib/invitations";
+import { recordAudit } from "@/lib/audit";
+import { rotateCaptureKey } from "@/lib/auth";
 
 /**
  * The household roster (§9).
@@ -81,7 +83,7 @@ export async function DELETE(req: Request) {
 
   const membership = await prisma.householdMembership.findUnique({
     where: { householdId_userId: { householdId: context.household.id, userId: id } },
-    select: { role: true },
+    select: { role: true, user: { select: { email: true } } },
   });
 
   const refusal = memberRemovalRefusal({
@@ -93,8 +95,37 @@ export async function DELETE(req: Request) {
   if (refusal === "not-a-member") return NextResponse.json({ error: refusal }, { status: 404 });
   if (refusal) return NextResponse.json({ error: refusal }, { status: 409 });
 
-  await prisma.householdMembership.delete({
-    where: { householdId_userId: { householdId: context.household.id, userId: id } },
+  // Rotating the household's bookmarklet capture key in the same transaction
+  // as the membership delete (§1) is what makes "no longer a member" and "no
+  // longer holds a working capture token" one atomic fact rather than a
+  // window in which the removed member's old token still validates. This
+  // rewrites the token for every remaining member too, not just the one who
+  // left — see rotateCaptureKey's own comment for why that's the right trade.
+  await prisma.$transaction(async (tx) => {
+    await tx.householdMembership.delete({
+      where: { householdId_userId: { householdId: context.household.id, userId: id } },
+    });
+    await rotateCaptureKey(context.household.id, tx);
   });
+
+  // The same action a platform admin's intervention writes (§9c) — there is
+  // no second enum value for "an admin did this to their own kitchen" — but a
+  // different sentence, and the difference is the whole point of reading the
+  // trail rather than the action column: an admin who was already a member is
+  // told apart from somebody reaching in from outside by what the detail says
+  // and by the household appearing in the actor's own membership history.
+  const remaining = await prisma.householdMembership.count({
+    where: { householdId: context.household.id },
+  });
+  await recordAudit({
+    action: "HOUSEHOLD_MEMBER_REMOVED",
+    actor: { id: context.user.id, email: context.user.email },
+    household: { id: context.household.id, name: context.household.name },
+    subjectEmail: membership?.user.email ?? null,
+    detail: `As an admin of ${context.household.name}, removed ${
+      membership?.user.email ?? id
+    } from it, leaving ${remaining} member${remaining === 1 ? "" : "s"}.`,
+  });
+
   return NextResponse.json({ ok: true });
 }

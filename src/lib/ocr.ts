@@ -100,6 +100,20 @@ function getWorker(): Promise<Worker> {
 let queue: Promise<unknown> = Promise.resolve();
 
 /**
+ * A ceiling on one recognition, well under the route's own `maxDuration`
+ * (60s) so a timeout here always beats whatever enforces that from outside.
+ *
+ * A phone photo that decodes to a pathological amount of apparent text —
+ * dense noise across the whole width Tesseract was asked to read at — can
+ * make `recognize()` run far longer than any real receipt does, and it has
+ * no timeout of its own. Left unbounded, that isn't just one slow request:
+ * every receipt in the app shares the one worker above through `queue`, so a
+ * single stuck recognition wedges every household's OCR behind it until the
+ * process restarts.
+ */
+const OCR_TIMEOUT_MS = 45_000;
+
+/**
  * Clean a photo up before Tesseract sees it.
  *
  * Honour the phone's orientation flag, drop to grey, and bring the width into
@@ -129,15 +143,46 @@ async function prepare(photo: Buffer): Promise<Buffer> {
 
 /** Transcribe a receipt photo. Throws if the bytes aren't a readable image. */
 export async function scanReceipt(photo: Buffer): Promise<ReceiptScan> {
+  // sharp's own default pixel-count ceiling (~268 megapixels, left in place —
+  // nothing here raises it) is what actually stops a decompression-bomb
+  // image at this step: it throws rather than allocating for whatever the
+  // header claims the decoded size is, and that throw propagates straight
+  // out of this function for the route to catch.
   const prepared = await prepare(photo);
 
-  const run = queue.then(async () => {
-    const worker = await getWorker();
-    const { data } = await worker.recognize(prepared);
-    return { text: data.text, confidence: data.confidence };
-  });
+  const run = queue.then(() => recognizeWithTimeout(prepared));
 
   // Keep the chain going whether this job succeeded or not.
   queue = run.catch(() => {});
   return run;
+}
+
+/**
+ * Race a recognition against `OCR_TIMEOUT_MS`. On timeout, the worker is
+ * terminated and dropped rather than left running: `recognize()` has no
+ * cancellation of its own, so the in-flight call is simply abandoned to
+ * finish or die on its own, but replacing `workerPromise` means the *next*
+ * receipt gets a fresh worker immediately instead of waiting behind it.
+ */
+async function recognizeWithTimeout(prepared: Buffer): Promise<ReceiptScan> {
+  const worker = await getWorker();
+
+  return new Promise<ReceiptScan>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      workerPromise = null;
+      worker.terminate().catch(() => {});
+      reject(new Error("OCR timed out"));
+    }, OCR_TIMEOUT_MS);
+
+    worker
+      .recognize(prepared)
+      .then(({ data }) => {
+        clearTimeout(timer);
+        resolve({ text: data.text, confidence: data.confidence });
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
 }

@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
 import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { describeMailError } from "@/lib/mailError";
+import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 import {
+  acceptanceWouldRequireSignIn,
   invitationUrl,
   isAlreadyMember,
   issueInvitation,
@@ -47,7 +52,13 @@ const Invite = z.object({
  * Answers 201 with `{ invitation, delivered, inviteUrl? }`. `inviteUrl` appears
  * only when there was no mail server to send it with: when the mail did go out
  * the link is already where it belongs, and putting a live credential in a
- * second place is pure risk.
+ * second place is pure risk. It is withheld even then — `linkWithheld: true`
+ * instead — when the address already has an account: for that address the
+ * link is not a way to introduce yourself, it is a way to sign in as
+ * somebody else's existing account with no password required, and handing
+ * it to a third party (the inviter) is exactly the bearer-token mistake
+ * acceptInvitation's `sign-in-required` check exists to close off. See
+ * acceptanceWouldRequireSignIn in src/lib/invitationService.ts.
  */
 export async function POST(req: Request) {
   const context = await currentHouseholdContext();
@@ -63,6 +74,17 @@ export async function POST(req: Request) {
   if (!looksLikeEmail(email)) {
     return NextResponse.json({ error: "invalid-email" }, { status: 400 });
   }
+
+  // Shared with /api/admin/invitations. Count the actor, their nearest proxy
+  // address, and the normalized recipient so neither a compromised account,
+  // a single host, nor several admins targeting one mailbox can send freely.
+  const refusal = await consumeAll([
+    ["invitation:issue:user", context.user.id],
+    ["invitation:issue:ip", clientIp(req.headers)],
+    ["invitation:issue:email", email],
+  ]);
+  if (refusal) return tooManyRequests(refusal);
+
   if (await isAlreadyMember(email, context.household.id)) {
     return NextResponse.json({ error: "already-a-member" }, { status: 409 });
   }
@@ -73,6 +95,17 @@ export async function POST(req: Request) {
     kind: "HOUSEHOLD",
     householdId: context.household.id,
     invitedById: context.user.id,
+  });
+
+  // The counterpart to PLATFORM_INVITATION_SENT: same act, an admin's own
+  // authority rather than the platform's. Recorded once the row exists, not
+  // once mail leaves — a relay that's down doesn't undo the offer.
+  await recordAudit({
+    action: "HOUSEHOLD_INVITATION_SENT",
+    actor: { id: context.user.id, email: context.user.email },
+    household: { id: context.household.id, name: context.household.name },
+    subjectEmail: email,
+    detail: `Invited ${email} to join ${context.household.name} as an admin.`,
   });
 
   // Shaped like a row of the GET list, so the card can render the new
@@ -110,13 +143,20 @@ export async function POST(req: Request) {
     );
   }
 
+  // `alreadyMember: false` is a known fact here, not an assumption: the check
+  // at the top of this handler has already refused to issue an invitation to
+  // an address already on this household's roster.
+  const unsafeToShare =
+    !delivered && (await acceptanceWouldRequireSignIn({ email, alreadyMember: false }));
+
   return NextResponse.json(
     {
       invitation: pending,
       delivered,
-      ...(delivered
+      ...(delivered || unsafeToShare
         ? {}
         : { inviteUrl: invitationUrl(token, new URL(req.url).origin) }),
+      ...(unsafeToShare ? { linkWithheld: true } : {}),
     },
     { status: 201 },
   );
@@ -140,8 +180,24 @@ export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "invalid" }, { status: 400 });
 
+  // Read the address before revoking, the same way the platform route does —
+  // once the row is gone, the id it was found by means nothing to anyone
+  // reading the trail later.
+  const invitation = await prisma.invitation.findFirst({
+    where: { id, householdId: context.household.id },
+    select: { email: true },
+  });
+
   const revoked = await revokeInvitation({ id, householdId: context.household.id });
   if (!revoked) return NextResponse.json({ error: "not-pending" }, { status: 409 });
+
+  await recordAudit({
+    action: "HOUSEHOLD_INVITATION_REVOKED",
+    actor: { id: context.user.id, email: context.user.email },
+    household: { id: context.household.id, name: context.household.name },
+    subjectEmail: invitation?.email ?? null,
+    detail: `Withdrew the invitation to ${invitation?.email ?? "an unknown address"} to join ${context.household.name}.`,
+  });
 
   return NextResponse.json({ ok: true });
 }

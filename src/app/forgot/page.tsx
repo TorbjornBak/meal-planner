@@ -20,6 +20,10 @@ export default function ForgotPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),
       });
+      if (res.status === 429) {
+        setError("Too many requests. Wait a bit before trying again.");
+        return;
+      }
       if (res.status === 503) {
         setError("This MealPlanner has no mail server configured, so it can't send a reset link.");
         return;

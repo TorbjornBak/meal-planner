@@ -13,6 +13,8 @@ import {
 import { hashPassword, passwordProblem, verifyPassword } from "@/lib/password";
 import { isMailConfigured, sendMail } from "@/lib/mail";
 import { passwordChangedEmail } from "@/lib/emails";
+import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 
 const Input = z.object({
   currentPassword: z.string().min(1).max(200),
@@ -28,6 +30,13 @@ const Input = z.object({
 export async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  // Before verifying, not after: the thing this limit exists to stop is a
+  // stolen session being used to grind the current password out of this very
+  // field, and a count that only started once a guess had already failed
+  // would let the first nine guesses of every ten go free.
+  const refusal = await consumeAll([["password-change:user", user.id]]);
+  if (refusal) return tooManyRequests(refusal);
 
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -52,6 +61,16 @@ export async function POST(req: Request) {
   // doing the changing — other devices are signed out, this one isn't.
   await destroyAllSessions(user.id);
   const token = await createSession(user.id);
+
+  // What an account takeover looks like from the outside starts here: the row
+  // says the change happened and that every other session was closed by it,
+  // which is the fact worth checking first if this address later reports
+  // being locked out.
+  await recordAudit({
+    action: "PASSWORD_CHANGED",
+    actor: { id: user.id, email: user.email },
+    detail: `${user.email} changed their password, which signed out every other device.`,
+  });
 
   if (isMailConfigured()) {
     try {

@@ -4,8 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { guardOperational } from "@/lib/opsGuard";
 import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 import { describeMailError } from "@/lib/mailError";
 import {
+  acceptanceWouldRequireSignIn,
   invitationUrl,
   issueInvitation,
   listPendingInvitations,
@@ -51,6 +54,14 @@ export async function POST(req: Request) {
   if (!looksLikeEmail(email)) {
     return NextResponse.json({ error: "invalid-email" }, { status: 400 });
   }
+
+  const refusal = await consumeAll([
+    ["invitation:issue:user", actor.id],
+    ["invitation:issue:ip", clientIp(req.headers)],
+    ["invitation:issue:email", email],
+  ]);
+  if (refusal) return tooManyRequests(refusal);
+
 
   // Not an error, and not a duplicate to refuse: somebody who already has an
   // account here can perfectly well be given a household of their own, and
@@ -104,11 +115,24 @@ export async function POST(req: Request) {
     );
   }
 
+  // A platform invitation has no household at issue time, so `alreadyMember`
+  // is always false here — there is nothing yet for the address to already
+  // belong to. What still needs checking is whether an account already
+  // exists at the address at all: if one does, the bare link is a way to
+  // sign in as it, not a way to introduce yourself, and it must not be
+  // handed to the inviter as a fallback for undelivered mail. See
+  // acceptanceWouldRequireSignIn in src/lib/invitationService.ts.
+  const unsafeToShare =
+    !delivered && (await acceptanceWouldRequireSignIn({ email, alreadyMember: false }));
+
   return NextResponse.json(
     {
       invitation: pending,
       delivered,
-      ...(delivered ? {} : { inviteUrl: invitationUrl(token, new URL(req.url).origin) }),
+      ...(delivered || unsafeToShare
+        ? {}
+        : { inviteUrl: invitationUrl(token, new URL(req.url).origin) }),
+      ...(unsafeToShare ? { linkWithheld: true } : {}),
     },
     { status: 201 },
   );

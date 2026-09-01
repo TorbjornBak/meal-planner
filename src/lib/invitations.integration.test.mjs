@@ -300,7 +300,7 @@ test(
 // --- Existing users -----------------------------------------------------------
 
 test(
-  "an address with a working password joins without being asked for a new one, and the password is untouched",
+  "an address with a working password, signed in as itself, joins without being asked for a new one, and the password is untouched",
   { skip: SKIP },
   async (t) => {
     const inviter = await makeInviter();
@@ -322,8 +322,11 @@ test(
       }),
     );
 
-    // No passwordHash supplied — the whole point of link-account.
-    const result = await acceptInvitation({ token });
+    // No passwordHash supplied — the whole point of link-account. The
+    // visitor's own session is what stands in for a password here, exactly
+    // the way it would for a person who opened the link while already
+    // signed in as themselves.
+    const result = await acceptInvitation({ token, signedInEmail: email });
     assert.equal(result.ok, true);
     assert.equal(result.plan, "link-account");
     assert.equal(result.userId, existingUser.id);
@@ -337,6 +340,96 @@ test(
 
     const after = await prisma.user.findUniqueOrThrow({ where: { id: existingUser.id } });
     assert.equal(after.passwordHash, PASSWORD_HASH, "an existing password must survive byte-for-byte");
+  },
+);
+
+// --- Account takeover via a bare token (the vulnerability this file guards) --
+
+test(
+  "an address with a working password CANNOT be joined anonymously — the token alone must never mint a session for an existing account",
+  { skip: SKIP },
+  async (t) => {
+    const inviter = await makeInviter();
+    const email = uniqueEmail("takeover-target");
+    const existingUser = await prisma.user.create({
+      data: { email, name: "Existing Victim", passwordHash: PASSWORD_HASH },
+    });
+    const { invitation, token } = await issueInvitation({
+      email,
+      kind: "HOUSEHOLD",
+      householdId: inviter.household.id,
+      invitedById: inviter.user.id,
+    });
+    t.after(() =>
+      cleanup({
+        invitationIds: [invitation.id],
+        householdIds: [inviter.household.id],
+        userIds: [inviter.user.id, existingUser.id],
+      }),
+    );
+
+    // The attack: hold the raw token (mailed, forwarded, or handed back as
+    // inviteUrl by an SMTP-less instance) and open it signed out. Before this
+    // fix, acceptInvitation quietly treated that as if the invitation's own
+    // address had been presented, refused nothing, and handed back
+    // ok:true — which is exactly what the accept route turns into a session
+    // cookie for the victim's account. `ok: false` here, not a session, is
+    // the fix.
+    const result = await acceptInvitation({ token });
+    assert.deepEqual(result, { ok: false, error: "sign-in-required" });
+
+    // Nothing about the victim's account moved: no new membership, and the
+    // invitation itself is still live for a legitimate, signed-in attempt.
+    assert.equal(
+      await prisma.householdMembership.count({
+        where: { householdId: inviter.household.id, userId: existingUser.id },
+      }),
+      0,
+    );
+    const stillLive = await prisma.invitation.findUniqueOrThrow({ where: { id: invitation.id } });
+    assert.equal(stillLive.acceptedAt, null);
+    assert.equal(stillLive.revokedAt, null);
+  },
+);
+
+test(
+  "the same address, opened anonymously and signed in as somebody else, is refused as a mismatch rather than sign-in-required",
+  { skip: SKIP },
+  async (t) => {
+    const inviter = await makeInviter();
+    const email = uniqueEmail("takeover-target-2");
+    const attackerEmail = uniqueEmail("attacker");
+    const existingUser = await prisma.user.create({
+      data: { email, name: "Existing Victim", passwordHash: PASSWORD_HASH },
+    });
+    const attacker = await prisma.user.create({
+      data: { email: attackerEmail, name: "Attacker", passwordHash: PASSWORD_HASH },
+    });
+    const { invitation, token } = await issueInvitation({
+      email,
+      kind: "HOUSEHOLD",
+      householdId: inviter.household.id,
+      invitedById: inviter.user.id,
+    });
+    t.after(() =>
+      cleanup({
+        invitationIds: [invitation.id],
+        householdIds: [inviter.household.id],
+        userIds: [inviter.user.id, existingUser.id, attacker.id],
+      }),
+    );
+
+    // Being signed in as *some* account doesn't help an attacker either —
+    // only a session for the invitation's own address does.
+    const result = await acceptInvitation({ token, signedInEmail: attackerEmail });
+    assert.deepEqual(result, { ok: false, error: "email-mismatch" });
+
+    assert.equal(
+      await prisma.householdMembership.count({
+        where: { householdId: inviter.household.id, userId: existingUser.id },
+      }),
+      0,
+    );
   },
 );
 
@@ -385,6 +478,63 @@ test(
       await prisma.household.count({ where: { name: householdName } }),
       1,
       "the losing acceptance must not have created a second household",
+    );
+    assert.equal(await prisma.user.count({ where: { email } }), 1);
+  },
+);
+
+test(
+  "a loser racing a HOUSEHOLD invitation is told 'accepted', never 'sign-in-required' — the stale-plan race this file regressed on",
+  { skip: SKIP },
+  async (t) => {
+    // Both racers are anonymous and start out looking like create-account,
+    // since nobody holds the address yet when the race begins. The bug this
+    // pins: acceptInvitation resolves whether an account already exists (and
+    // therefore what plan applies) from a read that isn't part of the claim,
+    // so it can run *after* the winner's transaction has already created the
+    // account and the membership. Before the fix, the loser's now-stale
+    // "nobody exists yet" assumption flipped to already-a-member — a plan
+    // that requires a sign-in nobody anonymous can supply — and it was
+    // refused with `sign-in-required` instead of the truth, which is that the
+    // link it was holding had simply already been spent. A HOUSEHOLD
+    // invitation exercises the `already-a-member` branch of that same bug
+    // (the PLATFORM race above only ever lands on `link-account`, since a
+    // freshly-created household has no membership yet for the loser to find).
+    const inviter = await makeInviter();
+    const email = uniqueEmail("household-racing");
+    const { invitation, token } = await issueInvitation({
+      email,
+      kind: "HOUSEHOLD",
+      householdId: inviter.household.id,
+      invitedById: inviter.user.id,
+    });
+
+    const [first, second] = await Promise.all([
+      acceptInvitation({ token, passwordHash: PASSWORD_HASH, name: "Racer One" }),
+      acceptInvitation({ token, passwordHash: PASSWORD_HASH, name: "Racer Two" }),
+    ]);
+
+    const outcomes = [first, second];
+    const winners = outcomes.filter((r) => r.ok);
+    const losers = outcomes.filter((r) => !r.ok);
+    assert.equal(winners.length, 1, "exactly one of the two racing acceptances should win the claim");
+    assert.equal(losers.length, 1);
+    // The assertion that matters: not merely `ok: false`, but the specific,
+    // deterministic reason — regardless of how the two racers' internal reads
+    // happened to interleave.
+    assert.deepEqual(losers[0], { ok: false, error: "accepted" });
+
+    t.after(() =>
+      cleanup({
+        invitationIds: [invitation.id],
+        householdIds: [inviter.household.id],
+        userIds: [inviter.user.id, winners[0].userId],
+      }),
+    );
+
+    assert.equal(
+      await prisma.householdMembership.count({ where: { householdId: inviter.household.id } }),
+      2, // the inviter, and exactly one winning racer — never both
     );
     assert.equal(await prisma.user.count({ where: { email } }), 1);
   },

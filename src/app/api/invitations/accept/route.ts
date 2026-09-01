@@ -8,19 +8,26 @@ import {
 } from "@/lib/auth";
 import { currentUser } from "@/lib/currentUser";
 import { hashPassword, passwordProblem } from "@/lib/password";
-import { acceptInvitation } from "@/lib/invitationService";
+import { acceptInvitation, inspectInvitation } from "@/lib/invitationService";
+import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 
 /**
  * POST /api/invitations/accept — spend an invitation (§9).
  *
- * Public, because the whole point is that the person answering has no account
- * yet. What stands in for a session is the link itself: single use, seven days,
- * and bound to one mailbox.
+ * Public, because the ordinary case is a person answering who has no account
+ * yet: for them, the link itself stands in for a session — single use, seven
+ * days, and bound to one mailbox. That is *not* extended to an address that
+ * already has an account: acceptInvitation refuses those with
+ * `sign-in-required` unless the caller already holds a session for that
+ * exact address, because otherwise the link alone would be a bearer
+ * credential for signing in as somebody else with no password at all.
  *
  * On success the caller is signed in and the browser's active household is the
- * one they just joined. They proved control of the address and (when there was
- * one to choose) chose a password; bouncing them to a login form to type it
- * again would be ceremony.
+ * one they just joined. They proved control of the address — by opening the
+ * link when no account existed yet, or by already being signed in as it when
+ * one did — and (when there was one to choose) chose a password; bouncing
+ * them to a login form to type it again would be ceremony.
  */
 
 const Input = z.object({
@@ -38,6 +45,28 @@ const LINK_PROBLEMS = new Set(["invalid-token", "expired", "revoked", "accepted"
 export async function POST(req: Request) {
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid" }, { status: 400 });
+
+  const ip = clientIp(req.headers);
+
+  // A read-only peek at the invitation, purely to learn the address it's
+  // bound to for the second rate-limit key below — never to decide anything
+  // about the acceptance itself, which acceptInvitation still re-checks for
+  // real further down. A token that doesn't resolve to a live invitation
+  // simply has no email to key on, the same way an unattributable caller has
+  // no IP: the key is skipped rather than folded into a shared bucket.
+  const invitation = await inspectInvitation(parsed.data.token);
+
+  const refusal = await consumeAll([
+    ["invitation:accept:ip", ip],
+    ["invitation:accept:email", invitation?.email ?? null],
+  ]);
+  if (refusal) {
+    await recordThrottleOnce({
+      bucket: refusal.bucket,
+      subject: refusal.bucket === "invitation:accept:email" ? (invitation?.email ?? null) : ip,
+    });
+    return tooManyRequests(refusal);
+  }
 
   // Hashed before the transaction: scrypt is deliberately slow, and holding a
   // database transaction open for it would serialise every other write behind
@@ -69,6 +98,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: result.error }, { status });
   }
 
+  // INVITATION_ACCEPTED and HOUSEHOLD_MEMBER_JOINED are recorded inside
+  // acceptInvitation itself, not here: that function already has the
+  // invitation's own household name and whether it just created that
+  // household in scope, from the same transaction that spent the token, which
+  // is a truer "at the point of the act" than a second lookup from this route
+  // could reconstruct.
   const token = await createSession(result.userId, result.householdId);
   const res = NextResponse.json({
     ok: true,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardOperational } from "@/lib/opsGuard";
+import { recordAudit } from "@/lib/audit";
 import { BorgCommandError, ensureSshKey } from "@/lib/borg";
 import { readBorgConfig } from "@/lib/borgConfig";
 import { describeBorgFailure } from "@/lib/borgError";
@@ -14,6 +15,17 @@ import { describeBorgFailure } from "@/lib/borgError";
  * This is most of what makes the setup short: instead of "shell into the
  * container, run ssh-keygen, find the file", a household copies one line off a
  * settings screen into their storage box.
+ *
+ * BACKUP_KEY_ACCESSED is worded around the Borg passphrase (§11) — the one
+ * secret that actually decrypts an archive — but that value never reaches the
+ * server at all: BackupCard.tsx generates the suggestion in the browser with
+ * `crypto.getRandomValues` and it is typed into the .env file by hand, never
+ * POSTed anywhere, precisely so it stays out of this app's logs and the
+ * database it protects. The one credential-bearing event that *does* cross
+ * the server boundary is this one — minting or reading the key pair this
+ * instance uses to authenticate to the storage host — so that is what gets
+ * recorded under the same action; the detail sentence says which secret it
+ * actually was rather than borrowing the passphrase's name for something else.
  */
 export async function POST() {
   const guard = await guardOperational();
@@ -23,6 +35,13 @@ export async function POST() {
 
   try {
     const key = await ensureSshKey(config);
+    await recordAudit({
+      action: "BACKUP_KEY_ACCESSED",
+      actor: guard.user ? { id: guard.user.id, email: guard.user.email } : null,
+      detail: key.created
+        ? `Generated a new SSH key at ${key.path} for this instance to authenticate to the backup host.`
+        : `Read the fingerprint of the existing SSH key at ${key.path} that this instance authenticates to the backup host with.`,
+    });
     return NextResponse.json({
       ok: true,
       created: key.created,

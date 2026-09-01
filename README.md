@@ -44,6 +44,14 @@ src/lib/                  Core logic:
   receiptTotal.ts           pick the total out of OCR'd receipt text (§7)
   spending.ts               weekly spend aggregation (§8)
   auth.ts                   accounts, sessions, emailed link tokens (§9)
+  invitationService.ts      issue, accept, revoke and deliver invitations (§9)
+  audit.ts                  durable security/operations event trail (§9c)
+  platformAdmin.ts          pure platform-role authorization rules (§9c)
+  csrf.ts                   origin checks for cookie-authenticated writes
+  rateLimitPolicy.ts        rate-limit keys, windows and pure arithmetic
+  rateLimit.ts              persistent counters and throttle auditing
+  securityHeaders.ts        per-response CSP and browser hardening headers
+  privateNetwork.ts         pure public/private IP classification
   password.ts               scrypt password hashing (§9)
   currentUser.ts            the signed-in user inside a request (§9)
   mail.ts                   SMTP transport, your own server (§9, §9b)
@@ -58,6 +66,11 @@ src/lib/                  Core logic:
   emails.ts                 reset / invitation / password-changed templates (§9)
   newsletter.ts             weekly digest composition, pure + tested (§9b)
   weeklyDigest.ts           gathering and delivering the digest (§9b)
+  retentionPolicy.ts        pure expiry rules for dead credentials
+  retention.ts              daily expired-credential cleanup
+  receiptPhoto.ts           safe receipt MIME types and upload limits
+  startupConfig.ts          which env vars are missing/weak/example values,
+                            pure + tested (Phase 6) — see "Startup checks" below
   prisma.ts                 Prisma client singleton
 src/app/                  App Router pages (dashboard, plan, recipes,
                           shopping, spending, settings, login, setup, forgot,
@@ -75,6 +88,8 @@ tessdata/                Vendored Tesseract language model for receipt OCR (§7)
 1. Copy env: `cp .env.example .env` and fill in `AUTH_SECRET`. The `SMTP_*`,
    `MAIL_FROM` and `APP_URL` values are optional locally — without them the app
    runs, it just can't send password resets, invitations or the weekly digest.
+   (The startup checks below only apply once `NODE_ENV=production`, so a
+   half-filled `.env` is fine for `npm run dev` and `npm test`.)
 2. Start Postgres (either `docker compose up db` or your own instance) and point
    `DATABASE_URL` at it.
 3. Install deps: `npm install`.
@@ -100,6 +115,84 @@ the TypeScript directly).
 - Migrations run automatically on container start (`prisma migrate deploy`).
 - Set up backups from Settings → Backups (§11). There is no crontab: the app
   takes them itself and tells you whether they worked.
+
+## Startup checks (Phase 6)
+
+In production (`NODE_ENV=production`), the app validates its own configuration
+once at boot, before the schedulers above start, and **refuses to start** if
+anything below is wrong — rather than booting clean and failing later on
+whoever happens to trigger the broken thing first. `src/lib/startupConfig.ts`
+is the pure rule table; `src/instrumentation.ts` is what calls it and, in
+production, calls `process.exit(1)`. `npm run dev`, `npm test` and `next
+build` are all unaffected — see below.
+
+| Variable | Missing | Left at the example value | Present but weak |
+| --- | --- | --- | --- |
+| `AUTH_SECRET` | Fatal | Fatal | Fatal (< 20 characters) |
+| `APP_URL` | Fatal | Fatal | Fatal if it doesn't parse as a URL, or isn't `https://` |
+| `DATABASE_URL` | Fatal, including blank credentials | Fatal if either credential is still `mealplanner` | Fatal if it doesn't parse |
+| `CRON_SECRET` | Fatal | Fatal | Fatal (< 20 characters) |
+| `BORG_REPO` | Fatal | — | — |
+| `BORG_PASSPHRASE` | Fatal | Fatal | Fatal (< 20 characters) |
+
+A few of these are worth spelling out:
+
+- **The operational secrets and backup destination are mandatory in
+  production.** An unset `CRON_SECRET` does make both bearer endpoints refuse
+  requests, and an unset `BORG_REPO` makes the scheduler idle, but either state
+  leaves a required production operation unavailable. Local development and
+  tests may still omit them; the boot check is production-only. The example
+  secrets are public in this repository and are rejected too.
+- **Default database credentials are treated as fatal, not a warning.**
+  `docker-compose.yml` defaults `POSTGRES_USER`/`POSTGRES_PASSWORD` to
+  `mealplanner`/`mealplanner` so a first `docker compose up` needs no setup —
+  fine for a box that only ever spoke to itself over Tailscale, wrong the
+  moment the Phase 6 exposure gate opens this to the public internet, since
+  the credentials guarding every recipe, plan and receipt photo in the
+  household would then be a published fact rather than a secret. The
+  alternative (a warning) would let a deployment stay on them forever, since
+  nothing would ever force the question again — so this refuses to start,
+  at the cost of one restart after changing `POSTGRES_PASSWORD` and
+  `DATABASE_URL` together.
+- **A non-`https` `APP_URL` is fatal in production, not a warning**, for the
+  same reason the security headers only send `HSTS` when `APP_URL` is
+  `https`: the links this URL builds carry one-time tokens (password reset,
+  invitation, unsubscribe) that are as good as a password while they're live,
+  and the Phase 6 exposure gate already refuses public ingress until HTTPS
+  terminates somewhere trusted — a production box without one hasn't met that
+  gate yet.
+- **A minimum length, not an entropy check.** `AUTH_SECRET`, `CRON_SECRET` and
+  `BORG_PASSPHRASE` are all required to be at least 20 characters once they're
+  checked at all. That's a floor, not a strength meter — measuring entropy
+  honestly needs a dependency, and this app avoids one on principle (§12) —
+  chosen to sit comfortably under `openssl rand -base64 32` (44 characters)
+  while still catching a short, human-chosen string.
+- **Never fires during `next build`.** Building the production image also runs
+  `register()` while it prerenders pages, with `NODE_ENV` forced to
+  `production` for the duration. `src/instrumentation.ts` checks
+  `NEXT_PHASE === "phase-production-build"` and skips the whole thing then, so
+  CI can build the image with no `.env` at all; the check only ever blocks a
+  container that's actually about to serve traffic (`next start`).
+
+A failing check prints every problem at once — not one per restart — as e.g.:
+
+```
+[startup] FATAL: AUTH_SECRET: AUTH_SECRET is not set. src/lib/auth.ts only discovers this when
+something first needs it — a sign-in, a capture-token check, a newsletter tick — so an unset
+secret lets the box boot and serve pages for hours before failing on whoever happens to trigger
+it first. Set it to a long random string before starting: `openssl rand -base64 32`, pasted as
+AUTH_SECRET="...".
+[startup] FATAL: DATABASE_URL: DATABASE_URL is still using the example "mealplanner"/"mealplanner"
+credentials from .env.example and docker-compose.yml's defaults. Set POSTGRES_USER and
+POSTGRES_PASSWORD (and, if you assemble DATABASE_URL yourself rather than letting compose do it,
+DATABASE_URL to match) to a real password before this box is reachable from anywhere but your own
+tailnet.
+[startup] refusing to start: 2 problem(s) above must be fixed first (AUTH_SECRET, DATABASE_URL).
+```
+
+Outside production, every one of the same findings is still printed — as
+`warning`, not `FATAL` — so a half-configured `npm run dev` box nags without
+ever refusing to boot.
 
 ## Accounts and email (§9, §9b)
 

@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { generateToken, hashToken, normalizeEmail } from "@/lib/auth";
 import { householdInviteEmail, platformInviteEmail } from "@/lib/emails";
 import { MailNotConfiguredError, appUrl, isMailConfigured, sendMail } from "@/lib/mail";
+import { recordAudit } from "@/lib/audit";
 import {
   type AcceptancePlan,
   type AcceptanceRefusal,
@@ -25,6 +26,7 @@ import {
   invitationState,
   needsHouseholdName,
   needsPassword,
+  planRequiresSignIn,
 } from "@/lib/invitations";
 
 /** An invitation plus the raw token, which exists only in this return value. */
@@ -160,6 +162,37 @@ export async function isAlreadyMember(email: string, householdId: string): Promi
     select: { userId: true },
   });
   return found !== null;
+}
+
+/**
+ * Whether handing this invitation's bare link straight to the inviter — the
+ * undelivered-mail fallback — would be handing them a bearer credential for
+ * an account that already belongs to somebody else.
+ *
+ * Mirrors the same two facts acceptInvitation itself checks, through the
+ * same pure rule (`planRequiresSignIn`, src/lib/invitations.ts): whether an
+ * account already exists at the address, and whether it already belongs to
+ * the household this invitation is for. `alreadyMember` is only ever false
+ * at issue time — a household invitation refuses to be issued at all once
+ * POST /api/invitations has already found the address on the roster, and a
+ * platform invitation has no household yet to belong to — but it is asked
+ * for explicitly rather than assumed, so this function stays true to what
+ * acceptInvitation would actually decide rather than a fact true only by
+ * the caller's own bookkeeping.
+ */
+export async function acceptanceWouldRequireSignIn(opts: {
+  email: string;
+  alreadyMember: boolean;
+}): Promise<boolean> {
+  const existing = await prisma.user.findUnique({
+    where: { email: normalizeEmail(opts.email) },
+    select: { passwordHash: true },
+  });
+  const plan = acceptancePlan({
+    existingUser: existing ? { hasPassword: existing.passwordHash !== null } : null,
+    alreadyMember: opts.alreadyMember,
+  });
+  return planRequiresSignIn(plan);
 }
 
 // -----------------------------------------------------------------------------
@@ -321,6 +354,46 @@ export type AcceptResult =
   | { ok: true; userId: string; householdId: string; plan: AcceptancePlan }
   | { ok: false; error: AcceptFailure };
 
+/**
+ * The sentence recorded when a link is spent (§9c, Phase 6).
+ *
+ * A pure function of the outcome, kept separate from acceptInvitation for the
+ * reason invitations.ts is separate from this file: the wording has three
+ * genuinely different shapes — a new household created, an existing one
+ * joined, or a link reopened on a membership that was already there — and a
+ * table of examples is what src/lib/invitationService.test.mjs checks against
+ * without a database.
+ */
+export function acceptanceDetail(opts: {
+  email: string;
+  householdName: string;
+  householdCreated: boolean;
+  plan: AcceptancePlan;
+}): string {
+  if (opts.plan === "already-a-member") {
+    return `${opts.email} reopened an invitation to ${opts.householdName}, which they already belonged to.`;
+  }
+  if (opts.householdCreated) {
+    return `${opts.email} accepted an invitation and created ${opts.householdName}.`;
+  }
+  return `${opts.email} accepted an invitation and joined ${opts.householdName} as an admin.`;
+}
+
+/**
+ * The sentence recorded when accepting actually seats somebody at the table —
+ * every case above except `already-a-member`, where the membership already
+ * existed and nothing new came into being.
+ */
+export function membershipJoinedDetail(opts: {
+  email: string;
+  householdName: string;
+  householdCreated: boolean;
+}): string {
+  return opts.householdCreated
+    ? `${opts.email} became the first admin of ${opts.householdName}.`
+    : `${opts.email} joined ${opts.householdName} as an admin, via invitation.`;
+}
+
 /** Thrown inside the transaction to roll it back when the claim is lost. */
 class LostClaimError extends Error {}
 
@@ -338,6 +411,15 @@ class LostClaimError extends Error {}
  * signed in as one account who opens an invitation addressed to another is not
  * quietly given the second household under the first account; they are told the
  * link is for a different address, and can sign out and try again.
+ *
+ * It does more than that, too: for `link-account` and `already-a-member` —
+ * the two plans where the invitation's address already has an account — a
+ * session for that exact address is required, not merely allowed. Without
+ * that, the token itself would be a bearer credential good enough to sign in
+ * as somebody else's pre-existing account with no password at all, which is
+ * precisely what a mailed or forwarded invitation link, or one handed back
+ * as `inviteUrl` on an instance with no SMTP configured, would then be. See
+ * `planRequiresSignIn` and `acceptanceRefusal` in src/lib/invitations.ts.
  */
 export async function acceptInvitation(opts: {
   token: string;
@@ -353,13 +435,24 @@ export async function acceptInvitation(opts: {
 
   const invitation = await prisma.invitation.findUnique({
     where: { tokenHash: await hashToken(opts.token) },
+    include: { household: { select: { name: true } } },
   });
   if (!invitation) return { ok: false, error: "invalid-token" };
 
-  const presented = opts.signedInEmail ? normalizeEmail(opts.signedInEmail) : invitation.email;
-  const refusal = acceptanceRefusal(invitation, presented, now);
-  if (refusal) return { ok: false, error: refusal };
+  // Never defaulted to invitation.email: a null here means genuinely
+  // anonymous, and acceptanceRefusal below treats that very differently from
+  // a session that happens to match. Collapsing the two — as this used to,
+  // by falling back to the invitation's own address — is what let a bare
+  // token mint a session for somebody else's existing account; see the
+  // module comment on acceptanceRefusal in src/lib/invitations.ts.
+  const signedInEmail = opts.signedInEmail ? normalizeEmail(opts.signedInEmail) : null;
 
+  // The plan has to be known before acceptanceRefusal can be asked anything,
+  // because whether an anonymous caller is allowed through depends on it:
+  // `create-account` is the one plan with no existing account for a session
+  // to prove control of. So this lookup — identical to the one
+  // inspectInvitation makes to word the acceptance page — now runs ahead of
+  // the refusal check rather than after it.
   const existing = await prisma.user.findUnique({
     where: { email: invitation.email },
     select: { id: true, passwordHash: true },
@@ -382,6 +475,40 @@ export async function acceptInvitation(opts: {
     existingUser: existing ? { hasPassword: existing.passwordHash !== null } : null,
     alreadyMember,
   });
+
+  const refusal = acceptanceRefusal(invitation, { signedInEmail, plan }, now);
+  if (refusal) {
+    // `plan` above came from reads of `existing` and `alreadyMember` that are
+    // not part of any claim on the row, so they can race a concurrent
+    // acceptance of this same link: two anonymous callers on a fresh
+    // PLATFORM or HOUSEHOLD invitation both start out looking like
+    // create-account, but if the winner's transaction — claim, then create
+    // the account — finishes before the loser reaches its own read of
+    // `existing`, the loser sees an account that now exists and resolves to
+    // link-account or already-a-member, which requires a sign-in it has no
+    // reason to expect. That reads as "sign in first" for a link that was
+    // actually just spent, which is the wrong thing to tell the loser and,
+    // as a table of expected outcomes, non-deterministic.
+    //
+    // The invitation row's own state is not stale in the same way: once a
+    // claim lands, `acceptedAt` is set inside the same transaction that
+    // created the account, so a fresh read of just that row (not the
+    // `invitation` fetched at the top of this function, which is exactly as
+    // stale as the plan) tells the truth about whether this link is still
+    // open. When it isn't, that fact — accepted, revoked, or expired — is
+    // what actually happened and is what gets reported, in place of a
+    // sign-in-required refusal computed from a snapshot of who exists that
+    // had already been overtaken by the time it was read.
+    if (refusal === "sign-in-required") {
+      const current = await prisma.invitation.findUnique({
+        where: { id: invitation.id },
+        select: { acceptedAt: true, revokedAt: true, expiresAt: true },
+      });
+      const freshState = current ? invitationState({ ...invitation, ...current }, now) : null;
+      if (freshState && freshState !== "live") return { ok: false, error: freshState };
+    }
+    return { ok: false, error: refusal };
+  }
 
   if (needsPassword(plan) && !opts.passwordHash) {
     return { ok: false, error: "password-required" };
@@ -468,6 +595,40 @@ export async function acceptInvitation(opts: {
 
       return { userId: user.id, householdId };
     });
+
+    // Acceptance is unauthenticated by nature — a link is the credential, not a
+    // session — so there is no actor to name; the record leans on the address
+    // the invitation was bound to and the sentence itself. Two rows, not one:
+    // INVITATION_ACCEPTED closes the invitation's own story (it fires even for
+    // `already-a-member`, where a link was reopened but nothing new was
+    // seated), and HOUSEHOLD_MEMBER_JOINED is the mirror of
+    // HOUSEHOLD_MEMBER_REMOVED — a roster line, written only when one actually
+    // appeared. Awaited, not fired-and-forgotten: recordAudit already swallows
+    // its own errors, so awaiting costs nothing and losing the promise would
+    // risk an unhandled rejection if that ever changed.
+    const householdCreated = invitation.householdId === null;
+    const householdName = invitation.household?.name ?? newHouseholdName ?? "Household";
+
+    await recordAudit({
+      action: "INVITATION_ACCEPTED",
+      subjectEmail: invitation.email,
+      household: { id: result.householdId, name: householdName },
+      detail: acceptanceDetail({
+        email: invitation.email,
+        householdName,
+        householdCreated,
+        plan,
+      }),
+    });
+
+    if (plan !== "already-a-member") {
+      await recordAudit({
+        action: "HOUSEHOLD_MEMBER_JOINED",
+        subjectEmail: invitation.email,
+        household: { id: result.householdId, name: householdName },
+        detail: membershipJoinedDetail({ email: invitation.email, householdName, householdCreated }),
+      });
+    }
 
     return { ok: true, plan, ...result };
   } catch (error) {

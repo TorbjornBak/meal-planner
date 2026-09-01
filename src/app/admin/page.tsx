@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { AuditAction } from "@prisma/client";
 import { DiagnosisPanel, type Diagnosis } from "../settings/Diagnosis";
 
 /**
@@ -328,6 +329,10 @@ function InvitationsSection({
   const [note, setNote] = useState<string | null>(null);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [undelivered, setUndelivered] = useState<{ email: string; url: string } | null>(null);
+  // Same situation as `undelivered`, but the address already has an
+  // account, so the server withheld the link rather than handing this
+  // admin a bearer credential for it — nothing to show or copy, only why.
+  const [linkWithheld, setLinkWithheld] = useState<string | null>(null);
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
 
   async function invite(e: React.FormEvent) {
@@ -336,6 +341,7 @@ function InvitationsSection({
     setNote(null);
     setDiagnosis(null);
     setUndelivered(null);
+    setLinkWithheld(null);
     setCopied(null);
     setBusy(true);
     try {
@@ -364,6 +370,8 @@ function InvitationsSection({
       }
       if (body.delivered) {
         setNote(`Invitation sent to ${body.invitation.email}.`);
+      } else if (body.linkWithheld) {
+        setLinkWithheld(body.invitation.email);
       } else {
         setUndelivered({ email: body.invitation.email, url: body.inviteUrl });
       }
@@ -506,6 +514,25 @@ function InvitationsSection({
           )}
         </div>
       )}
+
+      {linkWithheld && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: 10,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            An invitation for {linkWithheld} was created, but {linkWithheld} already has a
+            MealPlanner account, and email isn&apos;t set up on this instance to deliver the link
+            directly to them. For their protection, the link isn&apos;t shown here — anyone who
+            saw it could sign in as their existing account, with no password. Set up SMTP and
+            invite them again, and the link will go straight to their inbox instead.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -523,14 +550,7 @@ function expiryLabel(expiresAt: string): string {
 
 interface AuditEvent {
   id: string;
-  action:
-    | "PLATFORM_INVITATION_SENT"
-    | "PLATFORM_INVITATION_REVOKED"
-    | "HOUSEHOLD_ROLE_CHANGED"
-    | "HOUSEHOLD_MEMBER_REMOVED"
-    | "SMTP_TEST_SENT"
-    | "BACKUP_INITIALISED"
-    | "BACKUP_RUN_REQUESTED";
+  action: AuditAction;
   actorEmail: string | null;
   householdName: string | null;
   subjectEmail: string | null;
