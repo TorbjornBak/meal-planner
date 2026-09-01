@@ -5,6 +5,7 @@ import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { guardOperational } from "@/lib/opsGuard";
 import { recordAudit } from "@/lib/audit";
 import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 import { describeMailError } from "@/lib/mailError";
 import {
   invitationUrl,
@@ -45,13 +46,6 @@ export async function POST(req: Request) {
   const actor = guard.user;
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  // The same bucket /api/invitations counts against: one account may hold a
-  // household admin seat and the platform role at once, and the thing this
-  // limits — how much mail one account can make the box send — doesn't care
-  // which of the two invitation screens it went out of.
-  const refusal = await consumeAll([["invitation:issue:user", actor.id]]);
-  if (refusal) return tooManyRequests(refusal);
-
   const parsed = Invite.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid" }, { status: 400 });
 
@@ -59,6 +53,14 @@ export async function POST(req: Request) {
   if (!looksLikeEmail(email)) {
     return NextResponse.json({ error: "invalid-email" }, { status: 400 });
   }
+
+  const refusal = await consumeAll([
+    ["invitation:issue:user", actor.id],
+    ["invitation:issue:ip", clientIp(req.headers)],
+    ["invitation:issue:email", email],
+  ]);
+  if (refusal) return tooManyRequests(refusal);
+
 
   // Not an error, and not a duplicate to refuse: somebody who already has an
   // account here can perfectly well be given a household of their own, and

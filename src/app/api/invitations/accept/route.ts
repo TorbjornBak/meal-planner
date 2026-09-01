@@ -4,13 +4,12 @@ import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
   createSession,
-  recordThrottleOnce,
   sessionCookieOptions,
 } from "@/lib/auth";
 import { currentUser } from "@/lib/currentUser";
 import { hashPassword, passwordProblem } from "@/lib/password";
 import { acceptInvitation, inspectInvitation } from "@/lib/invitationService";
-import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
 
 /**

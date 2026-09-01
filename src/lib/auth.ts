@@ -15,8 +15,6 @@
 
 import { prisma } from "@/lib/prisma";
 import type { AuthTokenPurpose, HouseholdRole, User } from "@prisma/client";
-import { recordAudit } from "@/lib/audit";
-import { LIMITS, type LimitName, windowStartAt } from "@/lib/rateLimitPolicy";
 
 export const SESSION_COOKIE = "mp_session";
 
@@ -416,92 +414,4 @@ export function normalizeEmail(email: string): string {
  */
 export function looksLikeEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(email);
-}
-
-// -----------------------------------------------------------------------------
-// Rate-limit auditing
-// -----------------------------------------------------------------------------
-
-/**
- * The sentence written to AuditEvent when a limiter refuses a public request,
- * and — because it is deterministic in (bucket, subject) — also the value
- * recordThrottleOnce matches against to decide whether it has already written
- * one for this window (§9, Phase 6).
- *
- * Kept pure and separate from the write itself for the reason
- * rateLimitPolicy.ts is kept separate from rateLimit.ts: this is the part
- * worth checking word for word without a database, and here a typo doesn't
- * just read oddly on the admin screen, it silently breaks the dedup that
- * keeps a flood from writing one audit row per request.
- */
-export function throttleDetail(bucket: LimitName, subject: string | null): string {
-  const isEmailKey = bucket.endsWith(":email");
-  const target = subject ?? (isEmailKey ? "an unrecorded address" : "an unattributed address");
-
-  switch (bucket) {
-    case "login:ip":
-    case "login:email":
-      return isEmailKey
-        ? `Sign-in attempts against ${target} were throttled.`
-        : `Sign-in attempts from ${target} were throttled.`;
-    case "password-forgot:ip":
-    case "password-forgot:email":
-      return isEmailKey
-        ? `Password-reset requests against ${target} were throttled.`
-        : `Password-reset requests from ${target} were throttled.`;
-    case "password-reset:ip":
-      return `Password-reset submissions from ${target} were throttled.`;
-    case "invitation:inspect:ip":
-      return `Invitation-link views from ${target} were throttled.`;
-    case "invitation:accept:ip":
-    case "invitation:accept:email":
-      return isEmailKey
-        ? `Invitation acceptances against ${target} were throttled.`
-        : `Invitation acceptances from ${target} were throttled.`;
-    case "setup:ip":
-      return `First-run setup attempts from ${target} were throttled.`;
-    default:
-      // Every other limit in the table (invitation issuance, an SMTP test, a
-      // signed-in password change) is authenticated and never refuses an
-      // anonymous caller, so nothing here needs to word it — this function
-      // exists for the public routes in Phase 6's slice of the plan.
-      return `Attempts against ${target} were throttled.`;
-  }
-}
-
-/**
- * Record AUTH_THROTTLED the first time a limiter refuses a request in a given
- * window, and stay quiet for every refusal after that.
- *
- * consumeAll (src/lib/rateLimit.ts) reports only allow or refuse, on purpose:
- * the running count is the rate limiter's own business, and a route reading
- * it to make audit decisions would blur a boundary that is otherwise clean.
- * That leaves no cheap way to tell "the request that just tipped this bucket
- * over" from "the ten-thousandth request against a bucket that tipped over a
- * minute ago" by the numbers alone — and writing a row for every refusal
- * would turn a flood aimed at an already-closed door into a flood of audit
- * rows, which is exactly the write amplification the plan warns about.
- * Querying for a row already written for this bucket and subject inside the
- * current window is the alternative that doesn't need the count: it costs one
- * indexed read per refusal, and refusals are themselves already bounded by
- * the very limit that is doing the refusing.
- */
-export async function recordThrottleOnce(opts: {
-  bucket: LimitName;
-  subject: string | null;
-}): Promise<void> {
-  const detail = throttleDetail(opts.bucket, opts.subject);
-  const windowStart = windowStartAt(Date.now(), LIMITS[opts.bucket].windowMs);
-
-  const already = await prisma.auditEvent.findFirst({
-    where: { action: "AUTH_THROTTLED", detail, createdAt: { gte: windowStart } },
-    select: { id: true },
-  });
-  if (already) return;
-
-  await recordAudit({
-    action: "AUTH_THROTTLED",
-    subjectEmail: opts.bucket.endsWith(":email") ? opts.subject : null,
-    detail,
-  });
 }

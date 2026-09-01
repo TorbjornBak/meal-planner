@@ -38,6 +38,12 @@ export async function POST() {
       !process.env.APP_URL && "APP_URL",
     ].filter(Boolean);
 
+    await recordAudit({
+      action: "SMTP_TEST_FAILED",
+      actor: { id: actor.id, email: actor.email },
+      detail: `Checked the SMTP settings; configuration was incomplete (${missing.join(", ")} missing).`,
+    });
+
     return NextResponse.json({
       ok: false,
       summary: `Email isn't configured: ${missing.join(", ")} ${
@@ -70,6 +76,11 @@ export async function POST() {
     });
   } catch (err) {
     console.error("smtp verify failed", err);
+    await recordAudit({
+      action: "SMTP_TEST_FAILED",
+      actor: { id: actor.id, email: actor.email },
+      detail: `Checked the SMTP settings against ${settings.host}:${settings.port}; the connection or authentication failed.`,
+    });
     return NextResponse.json({
       ok: false,
       ...describeMailError(err, settings.host),

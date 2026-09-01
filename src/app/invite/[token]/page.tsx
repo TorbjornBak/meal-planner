@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { inspectInvitation } from "@/lib/invitationService";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
-import { recordThrottleOnce } from "@/lib/auth";
+import { recordThrottleOnce } from "@/lib/rateLimit";
 import { consumeAll } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
 import { AcceptForm } from "./AcceptForm";

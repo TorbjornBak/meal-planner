@@ -15,6 +15,9 @@
  */
 
 import { lookup } from "node:dns/promises";
+import * as http from "node:http";
+import * as https from "node:https";
+import { Readable } from "node:stream";
 import { classifyAddress } from "./privateNetwork";
 import { MAX_IMAGE_BYTES } from "./recipeImage";
 
@@ -47,8 +50,9 @@ export interface FetchedImage {
  * only to public addresses" requires actually resolving it: `isPrivateHost`
  * used to check the literal hostname a URL was built from, which passes a
  * hostname like `evil.example.com` straight through no matter what its DNS
- * record says. See the residual-risk note on `lookupIsSafe` below for what
- * checking the resolved address here still doesn't close.
+ * record says. `guardedFetch` uses the richer target returned by
+ * `resolvePublicTarget` below so the exact checked address is also the one the
+ * socket connects to.
  */
 export async function resolvePublicUrl(
   raw: string,
@@ -69,7 +73,13 @@ export async function resolvePublicUrl(
   if (url.username || url.password) return null;
   if (url.port && url.port !== "80" && url.port !== "443") return null;
 
-  return (await hostIsSafe(url.hostname)) ? url.toString() : null;
+  return (await resolvePublicTarget(url))?.url.toString() ?? null;
+}
+
+interface PublicTarget {
+  url: URL;
+  address: string;
+  family: 4 | 6;
 }
 
 /**
@@ -82,8 +92,8 @@ export async function resolvePublicUrl(
 const DNS_TIMEOUT_MS = 5_000;
 
 /**
- * Whether every address `hostname` resolves to right now is one this server
- * may connect to.
+ * Resolve every address for a URL, refuse the whole target if any address is
+ * private, and retain one validated address for the connection itself.
  *
  * Checking the *resolved* address rather than the literal hostname is what
  * closes the DNS gap (§10, Phase 6): `evil.example.com` whose A record is
@@ -99,45 +109,108 @@ const DNS_TIMEOUT_MS = 5_000;
  * entirely on that upstream behaviour, but the credit for closing this
  * particular bypass belongs to the URL parser, not the DNS lookup.
  *
- * **What this does not close.** Between this lookup returning "safe" and
- * the fetch that follows it actually opening a connection, the name can
- * re-resolve to a different, private address (DNS rebinding) — Node's global
- * `fetch` resolves the hostname again itself when it connects, with no way
- * to hand it the address we already validated. Closing that fully means
- * pinning the exact validated IP into the connection, which would mean
- * reaching for undici's `Agent`/`Dispatcher` with a custom `connect` hook
- * instead of the platform `fetch`. That's a real dependency-shaped change,
- * not a couple of lines, so it isn't done here; this function only narrows
- * the window from "no check at all" to "a check immediately before the
- * request, redone on every redirect hop." A recipe site running a
- * rebinding attack against its own readers is a threat model far past what
- * this app's guard is trying to cover.
+ * Returning the address rather than only a boolean is the important part:
+ * `requestPinned` below connects directly to it while preserving the original
+ * Host header and TLS server name. DNS is therefore consulted exactly once per
+ * redirect hop; a rebinding answer cannot replace the checked address between
+ * validation and connection.
  */
-async function hostIsSafe(hostname: string): Promise<boolean> {
-  if (classifyAddress(hostname) !== null) return false;
+async function resolvePublicTarget(url: URL): Promise<PublicTarget | null> {
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  if (classifyAddress(hostname) !== null) return null;
 
-  let addresses: string[];
+  let records: Array<{ address: string; family: number }>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const records = await Promise.race([
+    records = await Promise.race([
       lookup(hostname, { all: true, verbatim: true }),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("DNS lookup timed out")), DNS_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error("DNS lookup timed out")), DNS_TIMEOUT_MS);
       }),
     ]);
-    addresses = records.map((r) => r.address);
   } catch {
     // NXDOMAIN, a resolver timeout, no network — all mean "can't confirm
     // this is safe," which for a guard is the same answer as "unsafe."
-    return false;
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
-  return addresses.length > 0 && addresses.every((a) => classifyAddress(a) === null);
+  if (
+    records.length === 0 ||
+    records.some(
+      (record) =>
+        (record.family !== 4 && record.family !== 6) || classifyAddress(record.address) !== null,
+    )
+  ) {
+    return null;
+  }
+
+  return { url, address: records[0].address, family: records[0].family as 4 | 6 };
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /** More redirects than any real recipe site or CDN needs in practice. */
 const MAX_REDIRECTS = 5;
+
+/**
+ * One HTTP(S) GET whose socket is pinned to the address the guard validated.
+ * The URL's hostname still travels as Host and, for HTTPS, as SNI so ordinary
+ * virtual hosting and certificate verification keep working.
+ */
+function requestPinned(
+  target: PublicTarget,
+  init: { headers: Record<string, string>; timeoutMs: number },
+): Promise<Response> {
+  const client = target.url.protocol === "https:" ? https : http;
+  const headers = {
+    ...init.headers,
+    host: target.url.host,
+    // Native fetch transparently decompresses. Asking for identity keeps this
+    // lower-level request's Response semantics the same for its callers.
+    "accept-encoding": "identity",
+  };
+
+  return new Promise((resolve, reject) => {
+    const request = client.request(
+      {
+        protocol: target.url.protocol,
+        hostname: target.address,
+        family: target.family,
+        port: target.url.port || undefined,
+        path: `${target.url.pathname}${target.url.search}`,
+        method: "GET",
+        headers,
+        ...(target.url.protocol === "https:" ? { servername: target.url.hostname } : {}),
+      },
+      (incoming) => {
+        const responseHeaders = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (Array.isArray(value)) value.forEach((item) => responseHeaders.append(name, item));
+          else if (value !== undefined) responseHeaders.set(name, value);
+        }
+
+        const status = incoming.statusCode ?? 502;
+        const bodyForbidden = status === 204 || status === 205 || status === 304;
+        if (bodyForbidden) incoming.resume();
+        const response = new Response(
+          bodyForbidden ? null : (Readable.toWeb(incoming) as ReadableStream),
+          {
+            status,
+            statusText: incoming.statusMessage,
+            headers: responseHeaders,
+          },
+        );
+        Object.defineProperty(response, "url", { value: target.url.toString() });
+        resolve(response);
+      },
+    );
+    request.setTimeout(init.timeoutMs, () => request.destroy(new Error("request timed out")));
+    request.on("error", reject);
+    request.end();
+  });
+}
 
 /**
  * Fetch a URL, re-running the full guard — DNS resolution included — on
@@ -166,16 +239,25 @@ export async function guardedFetch(
   let base: string | undefined;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const safe = await resolvePublicUrl(next, base);
-    if (!safe) return null;
+    let url: URL;
+    try {
+      url = new URL(next, base);
+    } catch {
+      return null;
+    }
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password ||
+      (url.port && url.port !== "80" && url.port !== "443")
+    ) return null;
+
+    const target = await resolvePublicTarget(url);
+    if (!target) return null;
 
     let res: Response;
     try {
-      res = await fetch(safe, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(init.timeoutMs),
-        headers: init.headers,
-      });
+      res = await requestPinned(target, init);
     } catch {
       return null;
     }
@@ -184,8 +266,9 @@ export async function guardedFetch(
 
     const location = res.headers.get("location");
     if (!location) return null;
+    await res.body?.cancel().catch(() => {});
     next = location;
-    base = safe;
+    base = target.url.toString();
   }
 
   return null;

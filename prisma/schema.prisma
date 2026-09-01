@@ -645,6 +645,7 @@ enum AuditAction {
   HOUSEHOLD_MEMBER_REMOVED
   /// Installation-wide operations: proving the relay works, and the backups.
   SMTP_TEST_SENT
+  SMTP_TEST_FAILED
   BACKUP_INITIALISED
   BACKUP_RUN_REQUESTED
   /// A household admin offering their own kitchen to somebody, and changing

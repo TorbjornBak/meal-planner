@@ -40,7 +40,7 @@ test("the sensitive endpoints are keyed by both address and account", () => {
   // at a time, and lets somebody lock a neighbour out on purpose. Losing
   // either half of a pair is a silent regression, so the pairing itself is
   // asserted rather than left to the routes to remember.
-  for (const base of ["login", "password-forgot", "invitation:accept"]) {
+  for (const base of ["login", "password-forgot", "invitation:accept", "invitation:issue"]) {
     assert.ok(`${base}:ip` in LIMITS, `${base} has no per-address limit`);
     assert.ok(`${base}:email` in LIMITS, `${base} has no per-account limit`);
   }
@@ -49,11 +49,17 @@ test("the sensitive endpoints are keyed by both address and account", () => {
 test("the account key is at least as tight as the address key", () => {
   // An account limit looser than the address limit would never be the one that
   // trips, which makes it decoration.
-  for (const base of ["login", "password-forgot", "invitation:accept"]) {
+  for (const base of ["login", "password-forgot", "invitation:accept", "invitation:issue"]) {
     assert.ok(
       LIMITS[`${base}:email`].max <= LIMITS[`${base}:ip`].max,
       `${base}:email is looser than ${base}:ip and can never bind`,
     );
+  }
+});
+
+test("every endpoint that can send mail has an address limit", () => {
+  for (const base of ["password-forgot", "invitation:issue", "newsletter-send"]) {
+    assert.ok(`${base}:ip` in LIMITS, `${base} has no per-address limit`);
   }
 });
 

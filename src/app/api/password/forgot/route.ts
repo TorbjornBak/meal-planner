@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { RESET_TTL_MS, issueAuthToken, normalizeEmail, recordThrottleOnce } from "@/lib/auth";
+import { RESET_TTL_MS, issueAuthToken, normalizeEmail } from "@/lib/auth";
 import { isMailConfigured, sendMail } from "@/lib/mail";
 import { passwordResetEmail } from "@/lib/emails";
 import { recordAudit } from "@/lib/audit";
-import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
 
 const Input = z.object({ email: z.string().min(1).max(320) });

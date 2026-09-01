@@ -44,6 +44,14 @@ src/lib/                  Core logic:
   receiptTotal.ts           pick the total out of OCR'd receipt text (§7)
   spending.ts               weekly spend aggregation (§8)
   auth.ts                   accounts, sessions, emailed link tokens (§9)
+  invitationService.ts      issue, accept, revoke and deliver invitations (§9)
+  audit.ts                  durable security/operations event trail (§9c)
+  platformAdmin.ts          pure platform-role authorization rules (§9c)
+  csrf.ts                   origin checks for cookie-authenticated writes
+  rateLimitPolicy.ts        rate-limit keys, windows and pure arithmetic
+  rateLimit.ts              persistent counters and throttle auditing
+  securityHeaders.ts        per-response CSP and browser hardening headers
+  privateNetwork.ts         pure public/private IP classification
   password.ts               scrypt password hashing (§9)
   currentUser.ts            the signed-in user inside a request (§9)
   mail.ts                   SMTP transport, your own server (§9, §9b)
@@ -58,6 +66,9 @@ src/lib/                  Core logic:
   emails.ts                 reset / invitation / password-changed templates (§9)
   newsletter.ts             weekly digest composition, pure + tested (§9b)
   weeklyDigest.ts           gathering and delivering the digest (§9b)
+  retentionPolicy.ts        pure expiry rules for dead credentials
+  retention.ts              daily expired-credential cleanup
+  receiptPhoto.ts           safe receipt MIME types and upload limits
   startupConfig.ts          which env vars are missing/weak/example values,
                             pure + tested (Phase 6) — see "Startup checks" below
   prisma.ts                 Prisma client singleton
@@ -118,27 +129,20 @@ build` are all unaffected — see below.
 | Variable | Missing | Left at the example value | Present but weak |
 | --- | --- | --- | --- |
 | `AUTH_SECRET` | Fatal | Fatal | Fatal (< 20 characters) |
-| `APP_URL` | Fatal | — (no example value) | Fatal if it doesn't parse as a URL, or isn't `https://` |
-| `DATABASE_URL` | Fatal | Fatal if the credentials are still `mealplanner`/`mealplanner` | Fatal if it doesn't parse |
-| `CRON_SECRET` | **Not a problem** — see below | Fatal | Fatal (< 20 characters) |
-| `BORG_PASSPHRASE` | Not a problem *if `BORG_REPO` is also unset* — backups are optional (§11) | Fatal, but only once `BORG_REPO` is set | Fatal (< 20 characters), but only once `BORG_REPO` is set |
+| `APP_URL` | Fatal | Fatal | Fatal if it doesn't parse as a URL, or isn't `https://` |
+| `DATABASE_URL` | Fatal, including blank credentials | Fatal if either credential is still `mealplanner` | Fatal if it doesn't parse |
+| `CRON_SECRET` | Fatal | Fatal | Fatal (< 20 characters) |
+| `BORG_REPO` | Fatal | — | — |
+| `BORG_PASSPHRASE` | Fatal | Fatal | Fatal (< 20 characters) |
 
 A few of these are worth spelling out:
 
-- **`CRON_SECRET` unset is safe, not a warning.** `bearerTokenMatches`
-  (`src/lib/auth.ts`) refuses every request when the configured secret is
-  empty, so an unset `CRON_SECRET` simply closes `POST /api/backup/run` and
-  `POST /api/newsletter/send`. What's dangerous is setting it to the
-  placeholder this file ships — that string is public in this repository, so
-  a `CRON_SECRET` left equal to it is worse than no secret at all.
-- **`BORG_PASSPHRASE` follows the same shape.** Running with no backups
-  configured at all is a supported way to run this app (the nightly scheduler
-  already logs `not configured; nothing is being backed up` on every boot);
-  turning that into a startup failure would be a scope change this check
-  deliberately doesn't make. Once `BORG_REPO` is set, though, a weak or
-  placeholder passphrase is a real problem — it's the only thing standing
-  between anyone who can read this repository and every archive the box
-  writes — so that combination does fail production startup.
+- **The operational secrets and backup destination are mandatory in
+  production.** An unset `CRON_SECRET` does make both bearer endpoints refuse
+  requests, and an unset `BORG_REPO` makes the scheduler idle, but either state
+  leaves a required production operation unavailable. Local development and
+  tests may still omit them; the boot check is production-only. The example
+  secrets are public in this repository and are rejected too.
 - **Default database credentials are treated as fatal, not a warning.**
   `docker-compose.yml` defaults `POSTGRES_USER`/`POSTGRES_PASSWORD` to
   `mealplanner`/`mealplanner` so a first `docker compose up` needs no setup —

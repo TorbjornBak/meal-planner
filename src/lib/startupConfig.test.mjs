@@ -100,6 +100,12 @@ test("APP_URL over https has no finding", () => {
   assert.deepEqual(findingsFor("APP_URL", validEnv()), []);
 });
 
+test("APP_URL left at the .env.example hostname is fatal", () => {
+  const findings = findingsFor("APP_URL", validEnv({ APP_URL: "https://box.your-tailnet.ts.net" }));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /example/);
+});
+
 // --- DATABASE_URL ------------------------------------------------------
 
 test("DATABASE_URL missing is fatal", () => {
@@ -141,13 +147,23 @@ test("DATABASE_URL with real, distinct credentials has no finding", () => {
   assert.deepEqual(findingsFor("DATABASE_URL", validEnv()), []);
 });
 
+test("DATABASE_URL without a username or password is fatal", () => {
+  for (const DATABASE_URL of [
+    "postgresql://:realpassword@db:5432/mealplanner",
+    "postgresql://realuser@db:5432/mealplanner",
+  ]) {
+    const findings = findingsFor("DATABASE_URL", validEnv({ DATABASE_URL }));
+    assert.equal(findings.length, 1, DATABASE_URL);
+    assert.match(findings[0].message, /username and password/);
+  }
+});
+
 // --- CRON_SECRET ---------------------------------------------------------
 
-test("CRON_SECRET missing is not a finding at all", () => {
-  // Unset fails closed (bearerTokenMatches refuses every token when the
-  // configured secret is empty) — the endpoints just shut, which is safe by
-  // construction and not worth alarming anyone about.
-  assert.deepEqual(findingsFor("CRON_SECRET", validEnv({ CRON_SECRET: undefined })), []);
+test("CRON_SECRET missing is fatal", () => {
+  const findings = findingsFor("CRON_SECRET", validEnv({ CRON_SECRET: undefined }));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /not set/);
 });
 
 test("CRON_SECRET left at the .env.example placeholder is fatal", () => {
@@ -172,25 +188,17 @@ test("CRON_SECRET present, long and not the placeholder has no finding", () => {
 
 // --- BORG_PASSPHRASE -----------------------------------------------------
 
-test("no backup configured at all (BORG_REPO and BORG_PASSPHRASE both unset) is not a finding", () => {
-  // "No backups configured" is a supported, non-fatal state (§11's scheduler
-  // already logs it on every boot) — turning it fatal here would be the scope
-  // change the task explicitly rules out.
-  assert.deepEqual(
-    findingsFor("BORG_PASSPHRASE", validEnv({ BORG_REPO: undefined, BORG_PASSPHRASE: undefined })),
-    [],
-  );
+test("production backup configuration is required", () => {
+  const findings = findStartupProblems(
+    validEnv({ BORG_REPO: undefined, BORG_PASSPHRASE: undefined }),
+  ).filter((finding) => finding.variable === "BORG_REPO" || finding.variable === "BORG_PASSPHRASE");
+  assert.deepEqual(findings.map((finding) => finding.variable), ["BORG_REPO", "BORG_PASSPHRASE"]);
 });
 
-test("BORG_REPO set with BORG_PASSPHRASE unset is not a finding here", () => {
-  // A half-configured pair is "not configured" as far as isBackupConfigured
-  // (src/lib/borgConfig.ts) is concerned, and is already reported by the
-  // backup scheduler's own startup log line; this check only has something to
-  // say about a passphrase that exists and is wrong.
-  assert.deepEqual(
-    findingsFor("BORG_PASSPHRASE", validEnv({ BORG_PASSPHRASE: undefined })),
-    [],
-  );
+test("BORG_REPO set with BORG_PASSPHRASE unset is fatal", () => {
+  const findings = findingsFor("BORG_PASSPHRASE", validEnv({ BORG_PASSPHRASE: undefined }));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /not set/);
 });
 
 test("BORG_PASSPHRASE left at the .env.example placeholder on a configured repo is fatal", () => {

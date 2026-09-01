@@ -8,10 +8,10 @@
  * one impure thing this can't: reading `process.env` and, in production,
  * calling `process.exit`.
  *
- * Every finding here carries the severity it *would* have in production, and
- * is computed the same way in every environment. It is instrumentation.ts —
- * not this module — that decides, based on NODE_ENV, whether a "fatal" finding
- * actually blocks the process or is merely printed. That split is what makes
+ * Every finding here is fatal in production, and is computed the same way in
+ * every environment. It is instrumentation.ts — not this module — that decides,
+ * based on NODE_ENV, whether a finding actually blocks the process or is merely
+ * printed. That split is what makes
  * "the same findings are warnings in development" a one-line decision at the
  * call site instead of two copies of the checks.
  *
@@ -26,26 +26,10 @@
  * that failure to the one place someone is actually watching the logs.
  */
 
-/**
- * Two severities, and they mean different things to instrumentation.ts:
- *
- *   fatal    refuses a production start. Reserved for problems that would
- *            either brick the app the moment someone used the affected
- *            feature (AUTH_SECRET, DATABASE_URL, APP_URL) or hand a stranger
- *            a credential this repository publishes in cleartext
- *            (CRON_SECRET / BORG_PASSPHRASE left at the .env.example value).
- *   warning  worth a loud line in the log, never worth refusing to boot.
- *            Nothing currently reaches this severity in production — every
- *            check below is either "fine" or "fatal" — but the type exists so
- *            a future check (a deprecated variable, say) has somewhere to
- *            land without every fatal problem needing a sibling case.
- */
-export type StartupSeverity = "fatal" | "warning";
-
 export interface StartupFinding {
   /** The environment variable this finding is about. */
   variable: string;
-  severity: StartupSeverity;
+  severity: "fatal";
   /**
    * A full sentence (or two): what's wrong, and what to type instead. Written
    * for whoever is looking at a container that won't start, not for whoever
@@ -88,6 +72,7 @@ const PLACEHOLDER_SECRET = "change-me-to-a-long-random-string";
  */
 const EXAMPLE_DB_USER = "mealplanner";
 const EXAMPLE_DB_PASSWORD = "mealplanner";
+const EXAMPLE_APP_URL = "https://box.your-tailnet.ts.net";
 
 /**
  * Below this, a secret is either a short human-chosen string or a leftover
@@ -191,7 +176,18 @@ function checkAppUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
         `APP_URL="${raw}" is not https. Emailed links (password reset, invitations, unsubscribe) would ` +
         "carry their one-time tokens in plain text, and the security headers only send HSTS when this is " +
         'https. Use the https MagicDNS name, e.g. APP_URL="https://box.your-tailnet.ts.net" (§10), or the ' +
-        "https name of whatever terminates TLS in front of this box.",
+      "https name of whatever terminates TLS in front of this box.",
+    });
+    return;
+  }
+
+  if (url.toString().replace(/\/$/, "") === EXAMPLE_APP_URL) {
+    findings.push({
+      variable: "APP_URL",
+      severity: "fatal",
+      message:
+        `APP_URL is still the example value "${EXAMPLE_APP_URL}" from .env.example. ` +
+        "Replace it with this installation's real HTTPS hostname before starting production.",
     });
   }
 }
@@ -235,7 +231,15 @@ function checkDatabaseUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): v
   // start rather than merely log.
   const user = decodeURIComponent(url.username);
   const password = decodeURIComponent(url.password);
-  if (user === EXAMPLE_DB_USER && password === EXAMPLE_DB_PASSWORD) {
+  if (!user || !password) {
+    findings.push({
+      variable: "DATABASE_URL",
+      severity: "fatal",
+      message:
+        "DATABASE_URL must include both a username and password. Use a dedicated database account with " +
+        "a non-example password before starting production.",
+    });
+  } else if (user === EXAMPLE_DB_USER || password === EXAMPLE_DB_PASSWORD) {
     findings.push({
       variable: "DATABASE_URL",
       severity: "fatal",
@@ -250,15 +254,16 @@ function checkDatabaseUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): v
 
 function checkCronSecret(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
   const raw = env.CRON_SECRET?.trim() ?? "";
-  // Decision: absent is not a finding at all. bearerTokenMatches (src/lib/
-  // auth.ts) refuses every bearer token when the configured secret is empty,
-  // so an unset CRON_SECRET simply closes POST /api/backup/run and POST
-  // /api/newsletter/send — the same "fails closed" property AUTH_SECRET's
-  // *lazy* check doesn't have, and exactly why AUTH_SECRET gets a finding
-  // here while this doesn't. Flagging a missing CRON_SECRET would train
-  // whoever reads this output to set one out of habit, which only recreates
-  // the placeholder problem below.
-  if (!raw) return;
+  if (!raw) {
+    findings.push({
+      variable: "CRON_SECRET",
+      severity: "fatal",
+      message:
+        "CRON_SECRET is not set. Production requires a strong bearer secret for scheduled newsletter " +
+        'and backup requests; generate one with `openssl rand -base64 32`.',
+    });
+    return;
+  }
 
   pushIfPlaceholderOrShort(
     findings,
@@ -279,15 +284,25 @@ function checkBorgPassphrase(env: NodeJS.ProcessEnv, findings: StartupFinding[])
   const repo = env.BORG_REPO?.trim() ?? "";
   const passphrase = env.BORG_PASSPHRASE ?? "";
 
-  // Decision: an unconfigured backup is not this check's business. §11 calls
-  // backups non-optional, but making that true is a scope change this task
-  // explicitly isn't — src/instrumentation.ts's backup scheduler already logs
-  // "not configured (...); nothing is being backed up" on every boot, loudly
-  // and truthfully, which is the right amount of alarm for a feature that is
-  // allowed to be off. This function only has something to say once BORG_REPO
-  // is actually set: a passphrase problem is only real on a repository
-  // somebody meant to use.
-  if (!repo || !passphrase) return;
+  if (!repo) {
+    findings.push({
+      variable: "BORG_REPO",
+      severity: "fatal",
+      message:
+        "BORG_REPO is not set. A production installation must have a backup destination before it starts; " +
+        "configure the repository described in README.md under Backups.",
+    });
+  }
+  if (!passphrase) {
+    findings.push({
+      variable: "BORG_PASSPHRASE",
+      severity: "fatal",
+      message:
+        "BORG_PASSPHRASE is not set. Generate a strong passphrase, store a copy off the box, and configure " +
+        "it before production starts.",
+    });
+    return;
+  }
 
   pushIfPlaceholderOrShort(
     findings,

@@ -61,8 +61,8 @@ services:
       # Absolute base for links in email — emails are read away from the app,
       # so there's no request to infer an origin from. Your MagicDNS name (§10).
       APP_URL: ${APP_URL:-}
-      # Bearer token for triggering a send by hand, e.g. to re-run one week
-      # (§9b). The scheduled send no longer needs it.
+      # Required in production: bearer token for operational backup and manual
+      # newsletter runs. Replace the public example from .env.example.
       CRON_SECRET: ${CRON_SECRET:-}
       # The weekly digest schedules itself in-process (§9b) — there is no
       # crontab to keep. Friday 17:00 Europe/Copenhagen unless overridden.
@@ -73,9 +73,8 @@ services:
       DIGEST_SCHEDULER: ${DIGEST_SCHEDULER:-on}
       # Backups (§11) — nightly Borg archives of the database.
       #
-      # With BORG_REPO unset the app runs and says, on the settings screen,
-      # that nothing is being backed up. Set both and it backs up nightly and
-      # tells you whether it worked.
+      # Both are required in production. With them set, the app backs up
+      # nightly and reports whether it worked on the settings screen.
       #
       # BORG_PASSPHRASE is the only thing that can decrypt the archives, so it
       # has to be written down somewhere that isn't this box. It deliberately

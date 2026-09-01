@@ -6,6 +6,7 @@ import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { describeMailError } from "@/lib/mailError";
 import { recordAudit } from "@/lib/audit";
 import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 import {
   invitationUrl,
   isAlreadyMember,
@@ -59,13 +60,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  // Shared with /api/admin/invitations: the same person may hold both a
-  // household admin seat and the platform role, and the ceiling this protects
-  // — how much mail one account can make this box send — doesn't care which
-  // door the invitations went out of.
-  const refusal = await consumeAll([["invitation:issue:user", context.user.id]]);
-  if (refusal) return tooManyRequests(refusal);
-
   const parsed = Invite.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid" }, { status: 400 });
 
@@ -73,6 +67,17 @@ export async function POST(req: Request) {
   if (!looksLikeEmail(email)) {
     return NextResponse.json({ error: "invalid-email" }, { status: 400 });
   }
+
+  // Shared with /api/admin/invitations. Count the actor, their nearest proxy
+  // address, and the normalized recipient so neither a compromised account,
+  // a single host, nor several admins targeting one mailbox can send freely.
+  const refusal = await consumeAll([
+    ["invitation:issue:user", context.user.id],
+    ["invitation:issue:ip", clientIp(req.headers)],
+    ["invitation:issue:email", email],
+  ]);
+  if (refusal) return tooManyRequests(refusal);
+
   if (await isAlreadyMember(email, context.household.id)) {
     return NextResponse.json({ error: "already-a-member" }, { status: 409 });
   }

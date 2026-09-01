@@ -73,12 +73,16 @@ export const LIMITS = {
   "invitation:accept:email": { max: 5, windowMs: HOUR },
 
   /**
-   * Issuing invitations, keyed by the signed-in admin who asked. Authenticated,
-   * so this is not an anti-guessing measure — it is a ceiling on how much mail
-   * one account can make this box send, whether the account is being careless
-   * or has been taken over.
+   * Issuing invitations. The signed-in admin key caps a compromised account;
+   * the address key caps one caller walking recipients; and the email key
+   * protects one mailbox even if several admins or hosts target it.
    */
   "invitation:issue:user": { max: 20, windowMs: HOUR },
+  "invitation:issue:ip": { max: 20, windowMs: HOUR },
+  "invitation:issue:email": { max: 5, windowMs: HOUR },
+
+  /** A CRON_SECRET-authenticated manual digest run, still bounded per host. */
+  "newsletter-send:ip": { max: 20, windowMs: HOUR },
 
   /** Proving the SMTP relay works. One button, pressed by one admin. */
   "mail-test:user": { max: 5, windowMs: HOUR },
@@ -99,6 +103,38 @@ export const LIMITS = {
 } as const satisfies Record<string, Limit>;
 
 export type LimitName = keyof typeof LIMITS;
+
+/** A stable audit sentence for one throttled bucket and subject. */
+export function throttleDetail(bucket: LimitName, subject: string | null): string {
+  const isEmailKey = bucket.endsWith(":email");
+  const target = subject ?? (isEmailKey ? "an unrecorded address" : "an unattributed address");
+
+  switch (bucket) {
+    case "login:ip":
+    case "login:email":
+      return isEmailKey
+        ? `Sign-in attempts against ${target} were throttled.`
+        : `Sign-in attempts from ${target} were throttled.`;
+    case "password-forgot:ip":
+    case "password-forgot:email":
+      return isEmailKey
+        ? `Password-reset requests against ${target} were throttled.`
+        : `Password-reset requests from ${target} were throttled.`;
+    case "password-reset:ip":
+      return `Password-reset submissions from ${target} were throttled.`;
+    case "invitation:inspect:ip":
+      return `Invitation-link views from ${target} were throttled.`;
+    case "invitation:accept:ip":
+    case "invitation:accept:email":
+      return isEmailKey
+        ? `Invitation acceptances against ${target} were throttled.`
+        : `Invitation acceptances from ${target} were throttled.`;
+    case "setup:ip":
+      return `First-run setup attempts from ${target} were throttled.`;
+    default:
+      return `Attempts against ${target} were throttled.`;
+  }
+}
 
 /**
  * The start of the fixed window `now` falls in.

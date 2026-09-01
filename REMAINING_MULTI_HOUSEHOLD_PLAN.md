@@ -2,13 +2,9 @@
 
 ## Stopping point
 
-Phases 1–5 are complete, and Phase 6 implementation and operational verification
-are complete. Its independent standards/specification review is the final open
-gate below.
-
-**Do not open the exposure gate yet.** The remaining items include a
-dependency upgrade for seven high-severity advisories and a manual
-two-household isolation test, and neither has been done.
+Phases 1–5 are complete. Phase 6 implementation and operational verification
+are complete; the independent standards/specification review and its release
+blocking fixes are recorded below.
 
 Phases 1–5:
 
@@ -47,7 +43,7 @@ Verified live over HTTP against a scratch PostgreSQL, for every operational endp
 
 ## Phase 6 — public-internet hardening
 
-Done, verified by `npm test` (468 tests passing, none skipped after installing
+Done, verified by `npm test` (471 tests passing, none skipped after installing
 `borg`), `npx tsc --noEmit`, `npm run build`, and `prisma migrate deploy`
 against a scratch PostgreSQL 16:
 
@@ -107,7 +103,8 @@ against a scratch PostgreSQL 16:
       cannot turn the audit table into its own amplifier.
 - [x] Review upload/capture size limits, outbound fetch protections (DNS/IP
       validation and redirect re-checking), logging, retention. — See the three
-      findings below; **the dependency half of this bullet is NOT done.**
+      findings below; dependency remediation is recorded in the completion
+      checklist.
 
 ### What was found along the way
 
@@ -131,8 +128,10 @@ Three things turned up that the plan had not anticipated, all now fixed:
   allowed URL could 302 to a link-local address. The blocklist also missed
   `100.64.0.0/10` — which is Tailscale's own range, meaning a pasted recipe URL
   could probe every other machine on the household's tailnet. Now
-  `src/lib/privateNetwork.ts` (pure, exhaustively tested) plus a DNS-resolving
-  `guardedFetch` that re-validates every redirect hop, capped at five.
+      `src/lib/privateNetwork.ts` (pure, exhaustively tested) plus a DNS-resolving
+      `guardedFetch` that re-validates every redirect hop, caps the chain at
+      five, and pins each socket to the exact public address it validated so a
+      DNS rebinding answer cannot replace it between the check and connection.
 - **Nothing collected dead credentials.** Expired `Session` rows were deleted
   only when somebody presented that exact cookie, so a closed browser or a
   replaced phone left its row forever; *used* `AuthToken` rows were deleted by
@@ -164,8 +163,10 @@ Three things turned up that the plan had not anticipated, all now fixed:
       different text in a Danish browser. The rerun completed without CSP,
       console, hydration or request failures.
 - [ ] **Independent standards and specification review**, resolving all
-      high-severity findings. Not started. `/code-review` against the merge-base
-      is the intended vehicle.
+      high-severity findings. The first `/code-review` pass against the
+      merge-base found unsafe production-startup gaps and a DNS rebinding gap;
+      both are fixed, along with its documentation-boundary and mail-limit/audit
+      findings. A clean follow-up review is the final gate.
 - [x] **A backup restore rehearsal.** Installed Borg 1.4.5, ran the application's
       real `pg_dump` → encrypted `repokey-blake2` archive path against the
       scratch PostgreSQL database, extracted `mealplanner.sql`, restored it into

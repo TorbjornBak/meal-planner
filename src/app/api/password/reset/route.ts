@@ -6,7 +6,6 @@ import {
   SESSION_MAX_AGE_SECONDS,
   createSession,
   destroyAllSessions,
-  recordThrottleOnce,
   redeemAuthToken,
   sessionCookieOptions,
 } from "@/lib/auth";
@@ -14,7 +13,7 @@ import { hashPassword, passwordProblem } from "@/lib/password";
 import { isMailConfigured, sendMail } from "@/lib/mail";
 import { passwordChangedEmail } from "@/lib/emails";
 import { recordAudit } from "@/lib/audit";
-import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
 
 const Input = z.object({

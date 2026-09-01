@@ -9,11 +9,10 @@ import {
   looksLikeEmail,
   needsSetup,
   normalizeEmail,
-  recordThrottleOnce,
   sessionCookieOptions,
 } from "@/lib/auth";
 import { hashPassword, passwordProblem } from "@/lib/password";
-import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
 
 const Input = z.object({

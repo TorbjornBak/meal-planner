@@ -1,7 +1,7 @@
 // Tests for the pure logic behind Phase 6's public-route rate limiting (§9,
 // Phase 6). Run with `npm test`.
 //
-// throttleDetail is the one piece of new logic in src/lib/auth.ts that is a
+// throttleDetail is the pure wording logic beside the persistent limiter: a
 // total function of its arguments — the sentence AUTH_THROTTLED records, and
 // also the key recordThrottleOnce matches on to decide whether it has already
 // written one for this window. Both jobs ride on the same string, so a
@@ -14,38 +14,12 @@
 // src/lib/rateLimit.integration.test.mjs's sibling suite once that table
 // exists to query; this file covers the half that doesn't need one.
 //
-// auth.ts reaches Prisma and the audit log through the `@/` path alias, which
-// only Next.js and `tsc` resolve, so this loader hook rewrites `@/x` to
-// src/x.ts before anything is imported — the same device
-// src/lib/rateLimit.integration.test.mjs uses. Importing auth.ts this way
-// never touches a real database: PrismaClient's constructor doesn't connect
-// until something queries it, and nothing here does.
+// The wording lives in the pure policy module, so this suite needs no database
+// and no Next.js runtime.
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { register } from "node:module";
-import path from "node:path";
-
-process.env.AUTH_SECRET ??= "auth-routes-test-secret-do-not-use-elsewhere";
-
-const SRC = path.resolve(import.meta.dirname, "..");
-
-const resolveAliasHook = `
-  import path from "node:path";
-  import { pathToFileURL } from "node:url";
-  const SRC = ${JSON.stringify(SRC)};
-  export async function resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith("@/")) {
-      const target = pathToFileURL(path.join(SRC, specifier.slice(2) + ".ts")).href;
-      return nextResolve(target, context);
-    }
-    return nextResolve(specifier, context);
-  }
-`;
-register(`data:text/javascript,${encodeURIComponent(resolveAliasHook)}`, import.meta.url);
-
-const { throttleDetail } = await import("./auth.ts");
-const { LIMITS } = await import("./rateLimitPolicy.ts");
+const { LIMITS, throttleDetail } = await import("./rateLimitPolicy.ts");
 
 // --- coverage --------------------------------------------------------------
 

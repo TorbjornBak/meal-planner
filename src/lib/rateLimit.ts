@@ -15,10 +15,12 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { recordAudit } from "@/lib/audit";
 import {
   LIMITS,
   type LimitName,
   decide,
+  throttleDetail,
   windowExpiresAt,
   windowStartAt,
 } from "@/lib/rateLimitPolicy";
@@ -175,4 +177,24 @@ export function tooManyRequests(refusal: Refusal): NextResponse {
     { error: "too-many-requests", retryAfter: refusal.retryAfterSeconds },
     { status: 429, headers: { "Retry-After": String(refusal.retryAfterSeconds) } },
   );
+}
+
+/** Record at most one AUTH_THROTTLED event per subject and fixed window. */
+export async function recordThrottleOnce(opts: {
+  bucket: LimitName;
+  subject: string | null;
+}): Promise<void> {
+  const detail = throttleDetail(opts.bucket, opts.subject);
+  const windowStart = windowStartAt(Date.now(), LIMITS[opts.bucket].windowMs);
+  const already = await prisma.auditEvent.findFirst({
+    where: { action: "AUTH_THROTTLED", detail, createdAt: { gte: windowStart } },
+    select: { id: true },
+  });
+  if (already) return;
+
+  await recordAudit({
+    action: "AUTH_THROTTLED",
+    subjectEmail: opts.bucket.endsWith(":email") ? opts.subject : null,
+    detail,
+  });
 }
