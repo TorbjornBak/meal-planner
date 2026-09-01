@@ -1,0 +1,93 @@
+import Link from "next/link";
+import { prisma } from "@/lib/prisma";
+import { weeklyBuckets } from "@/lib/spending";
+import { WeeklySpendChart } from "@/components/WeeklySpendChart";
+import { RecipeSuggestions } from "@/components/RecipeSuggestions";
+import { requireHouseholdContext } from "@/lib/currentUser";
+
+// Reads live data behind the shared-session gate — never statically rendered.
+export const dynamic = "force-dynamic";
+
+function money(n: number): string {
+  return `${Math.round(n)} kr`;
+}
+
+/**
+ * The app's home screen, at /dashboard rather than "/" since the landing page
+ * took the bare domain (src/app/page.tsx). Nothing about this page changed in
+ * the move; what changed is that "/" now has to be answerable to somebody with
+ * no account, and this page never can be.
+ */
+export default async function DashboardPage() {
+  const { household } = await requireHouseholdContext();
+  const [recipeCount, trips] = await Promise.all([
+    prisma.recipe.count({ where: { householdId: household.id } }),
+    prisma.shoppingTrip.findMany({
+      where: { householdId: household.id },
+      orderBy: { date: "asc" },
+    }),
+  ]);
+
+  const rows = trips.map((t) => ({ date: t.date, total: Number(t.total) }));
+  const buckets = weeklyBuckets(rows, 12);
+
+  const now = new Date();
+  const monthTotal = rows
+    .filter(
+      (t) =>
+        t.date.getFullYear() === now.getFullYear() &&
+        t.date.getMonth() === now.getMonth(),
+    )
+    .reduce((a, t) => a + t.total, 0);
+
+  return (
+    <>
+      <h1>Dashboard</h1>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
+        <div className="card" style={{ flex: 1, minWidth: 160, marginBottom: 0 }}>
+          <div className="muted">Recipes</div>
+          <strong style={{ fontSize: "2em" }}>{recipeCount}</strong>
+        </div>
+        <div className="card" style={{ flex: 1, minWidth: 160, marginBottom: 0 }}>
+          <div className="muted">Spent this month</div>
+          <strong style={{ fontSize: "2em" }}>{money(monthTotal)}</strong>
+        </div>
+      </div>
+
+      {/* Above the spending, deliberately. This is the screen you open in the
+          late afternoon with nothing decided (§2e); what the month has cost is
+          a thing you look up, not a thing you are asked. */}
+      <RecipeSuggestions />
+
+      <div className="card">
+        <h2>Weekly spend</h2>
+        {trips.length === 0 ? (
+          <p className="muted">
+            No trips logged yet — <Link href="/spending">log one</Link>.
+          </p>
+        ) : (
+          <WeeklySpendChart data={buckets} />
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Quick links</h2>
+        <ul>
+          <li>
+            <Link href="/recipes/new">Paste or capture a recipe</Link> (§1)
+          </li>
+          <li>
+            <Link href="/recipes">Find recipes by ingredient</Link> (§2)
+          </li>
+          <li>
+            <Link href="/plan">Plan this week&rsquo;s dinners</Link> (§3)
+          </li>
+          <li>
+            <Link href="/shopping">Shopping list</Link> (§5, §6)
+          </li>
+        </ul>
+      </div>
+    </>
+  );
+}

@@ -54,7 +54,7 @@ export function ResetForm({
       }
 
       // The reset signs us in, so go straight into the app.
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     } finally {
       setBusy(false);

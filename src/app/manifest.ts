@@ -7,7 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "MealPlanner",
     short_name: "MealPlanner",
     description: "Household dinners → shopping list → grocery spend.",
-    start_url: "/",
+    start_url: "/dashboard",
     display: "standalone",
     background_color: "#faf9f7",
     theme_color: "#faf9f7",
