@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
+import { receiptPhotoProblem } from "@/lib/receiptPhoto";
 
 // Spend ledger (§7). A trip is date + store + typed total + a receipt photo
 // stored in the DB. No OCR, no line items. Loosely coupled to the shopping list.
@@ -47,13 +48,18 @@ export async function POST(req: Request) {
 
   // Attach the receipt photo if one was uploaded.
   if (photo && photo instanceof File && photo.size > 0) {
+    // Checked before the bytes are read, and before anything is stored. The
+    // type matters as much as the size here: these bytes are served back from
+    // this app's own origin under the type recorded with them (§7), so an
+    // unchecked type is a stored-XSS hole rather than a tidiness question.
+    // See src/lib/receiptPhoto.ts.
+    const problem = receiptPhotoProblem(photo);
+    if (problem) {
+      return NextResponse.json({ error: problem }, { status: 413 });
+    }
     const bytes = Buffer.from(await photo.arrayBuffer());
     await prisma.receipt.create({
-      data: {
-        tripId: trip.id,
-        photo: bytes,
-        mimeType: photo.type || "application/octet-stream",
-      },
+      data: { tripId: trip.id, photo: bytes, mimeType: photo.type },
     });
   }
 

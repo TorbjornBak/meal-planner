@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { guardOperational } from "@/lib/opsGuard";
 import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 import { describeMailError } from "@/lib/mailError";
 import {
   invitationUrl,
@@ -43,6 +44,13 @@ export async function POST(req: Request) {
   if (!guard.ok) return guard.response;
   const actor = guard.user;
   if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  // The same bucket /api/invitations counts against: one account may hold a
+  // household admin seat and the platform role at once, and the thing this
+  // limits — how much mail one account can make the box send — doesn't care
+  // which of the two invitation screens it went out of.
+  const refusal = await consumeAll([["invitation:issue:user", actor.id]]);
+  if (refusal) return tooManyRequests(refusal);
 
   const parsed = Invite.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid" }, { status: 400 });

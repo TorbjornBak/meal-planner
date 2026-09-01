@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
 import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
 import { describeMailError } from "@/lib/mailError";
+import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 import {
   invitationUrl,
   isAlreadyMember,
@@ -56,6 +59,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  // Shared with /api/admin/invitations: the same person may hold both a
+  // household admin seat and the platform role, and the ceiling this protects
+  // — how much mail one account can make this box send — doesn't care which
+  // door the invitations went out of.
+  const refusal = await consumeAll([["invitation:issue:user", context.user.id]]);
+  if (refusal) return tooManyRequests(refusal);
+
   const parsed = Invite.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid" }, { status: 400 });
 
@@ -73,6 +83,17 @@ export async function POST(req: Request) {
     kind: "HOUSEHOLD",
     householdId: context.household.id,
     invitedById: context.user.id,
+  });
+
+  // The counterpart to PLATFORM_INVITATION_SENT: same act, an admin's own
+  // authority rather than the platform's. Recorded once the row exists, not
+  // once mail leaves — a relay that's down doesn't undo the offer.
+  await recordAudit({
+    action: "HOUSEHOLD_INVITATION_SENT",
+    actor: { id: context.user.id, email: context.user.email },
+    household: { id: context.household.id, name: context.household.name },
+    subjectEmail: email,
+    detail: `Invited ${email} to join ${context.household.name} as an admin.`,
   });
 
   // Shaped like a row of the GET list, so the card can render the new
@@ -140,8 +161,24 @@ export async function DELETE(req: Request) {
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "invalid" }, { status: 400 });
 
+  // Read the address before revoking, the same way the platform route does —
+  // once the row is gone, the id it was found by means nothing to anyone
+  // reading the trail later.
+  const invitation = await prisma.invitation.findFirst({
+    where: { id, householdId: context.household.id },
+    select: { email: true },
+  });
+
   const revoked = await revokeInvitation({ id, householdId: context.household.id });
   if (!revoked) return NextResponse.json({ error: "not-pending" }, { status: 409 });
+
+  await recordAudit({
+    action: "HOUSEHOLD_INVITATION_REVOKED",
+    actor: { id: context.user.id, email: context.user.email },
+    household: { id: context.household.id, name: context.household.name },
+    subjectEmail: invitation?.email ?? null,
+    detail: `Withdrew the invitation to ${invitation?.email ?? "an unknown address"} to join ${context.household.name}.`,
+  });
 
   return NextResponse.json({ ok: true });
 }

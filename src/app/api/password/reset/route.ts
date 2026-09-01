@@ -6,18 +6,20 @@ import {
   SESSION_MAX_AGE_SECONDS,
   createSession,
   destroyAllSessions,
+  recordThrottleOnce,
   redeemAuthToken,
   sessionCookieOptions,
 } from "@/lib/auth";
 import { hashPassword, passwordProblem } from "@/lib/password";
 import { isMailConfigured, sendMail } from "@/lib/mail";
 import { passwordChangedEmail } from "@/lib/emails";
+import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 
 const Input = z.object({
   token: z.string().min(1).max(200),
   password: z.string().min(1).max(200),
-  /** Invitations and resets are the same mechanism with different copy. */
-  purpose: z.enum(["PASSWORD_RESET", "INVITE"]).default("PASSWORD_RESET"),
 });
 
 /**
@@ -26,11 +28,30 @@ const Input = z.object({
  * On success the caller is signed in immediately: they've just proved control
  * of the mailbox and chosen a password, so sending them back to a login form
  * would ask them to type it again for nothing.
+ *
+ * Redeems only PASSWORD_RESET tokens. Before Phase 4's Invitation model, this
+ * endpoint also took a `purpose` field and would redeem an INVITE AuthToken —
+ * which meant any caller holding one, or simply guessing the string, could ask
+ * this route to treat it as one. Invitations are minted and spent as
+ * Invitation rows now, through /api/invitations/accept, so there is nothing
+ * left for this endpoint to redeem but a reset link, and it no longer takes
+ * the caller's word for which kind of token it's holding (Phase 6).
  */
 export async function POST(req: Request) {
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid" }, { status: 400 });
+  }
+
+  const ip = clientIp(req.headers);
+
+  // Keyed by address only — the token is 256 bits, so this isn't about
+  // guessing it, it's about not letting a scripted caller hammer the endpoint
+  // that writes password hashes.
+  const refusal = await consumeAll([["password-reset:ip", ip]]);
+  if (refusal) {
+    await recordThrottleOnce({ bucket: refusal.bucket, subject: ip });
+    return tooManyRequests(refusal);
   }
 
   const problem = passwordProblem(parsed.data.password);
@@ -40,7 +61,7 @@ export async function POST(req: Request) {
 
   // Validate the password *before* spending the token, so a rejected password
   // doesn't burn the link and force another trip through the inbox.
-  const user = await redeemAuthToken(parsed.data.token, parsed.data.purpose);
+  const user = await redeemAuthToken(parsed.data.token, "PASSWORD_RESET");
   if (!user) {
     return NextResponse.json({ error: "invalid-token" }, { status: 400 });
   }
@@ -54,7 +75,13 @@ export async function POST(req: Request) {
   // password, so every existing session dies here.
   await destroyAllSessions(user.id);
 
-  if (parsed.data.purpose === "PASSWORD_RESET" && isMailConfigured()) {
+  await recordAudit({
+    action: "PASSWORD_RESET_COMPLETED",
+    subjectEmail: user.email,
+    detail: `${user.email} completed a password reset.`,
+  });
+
+  if (isMailConfigured()) {
     try {
       await sendMail({ to: user.email, ...passwordChangedEmail({ name: user.name }) });
     } catch (err) {

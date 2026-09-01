@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardOperational } from "@/lib/opsGuard";
 import { recordAudit } from "@/lib/audit";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
 import { isMailConfigured, verifyMailConnection } from "@/lib/mail";
 import { describeMailError } from "@/lib/mailError";
 
@@ -19,6 +20,16 @@ export async function POST() {
   // whoever can go and change the setting, and to nobody else.
   const guard = await guardOperational();
   if (!guard.ok) return guard.response;
+  const actor = guard.user;
+  if (!actor) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  // This route has no bearer door (guardOperational() is called with no
+  // options above), so `actor` is always the signed-in platform admin who
+  // pressed the button — never a script. Keyed by that account: the limit is
+  // "how many times can one admin lean on this button", not a defence against
+  // guessing anything.
+  const refusal = await consumeAll([["mail-test:user", actor.id]]);
+  if (refusal) return tooManyRequests(refusal);
 
   if (!isMailConfigured()) {
     const missing = [
@@ -49,7 +60,7 @@ export async function POST() {
     await verifyMailConnection();
     await recordAudit({
       action: "SMTP_TEST_SENT",
-      actor: guard.user ? { id: guard.user.id, email: guard.user.email } : null,
+      actor: { id: actor.id, email: actor.email },
       detail: `Checked the SMTP settings against ${settings.host}:${settings.port}; the relay accepted the connection.`,
     });
     return NextResponse.json({

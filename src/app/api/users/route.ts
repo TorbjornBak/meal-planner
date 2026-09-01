@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
 import { memberRemovalRefusal } from "@/lib/invitations";
+import { recordAudit } from "@/lib/audit";
 
 /**
  * The household roster (§9).
@@ -81,7 +82,7 @@ export async function DELETE(req: Request) {
 
   const membership = await prisma.householdMembership.findUnique({
     where: { householdId_userId: { householdId: context.household.id, userId: id } },
-    select: { role: true },
+    select: { role: true, user: { select: { email: true } } },
   });
 
   const refusal = memberRemovalRefusal({
@@ -96,5 +97,25 @@ export async function DELETE(req: Request) {
   await prisma.householdMembership.delete({
     where: { householdId_userId: { householdId: context.household.id, userId: id } },
   });
+
+  // The same action a platform admin's intervention writes (§9c) — there is
+  // no second enum value for "an admin did this to their own kitchen" — but a
+  // different sentence, and the difference is the whole point of reading the
+  // trail rather than the action column: an admin who was already a member is
+  // told apart from somebody reaching in from outside by what the detail says
+  // and by the household appearing in the actor's own membership history.
+  const remaining = await prisma.householdMembership.count({
+    where: { householdId: context.household.id },
+  });
+  await recordAudit({
+    action: "HOUSEHOLD_MEMBER_REMOVED",
+    actor: { id: context.user.id, email: context.user.email },
+    household: { id: context.household.id, name: context.household.name },
+    subjectEmail: membership?.user.email ?? null,
+    detail: `As an admin of ${context.household.name}, removed ${
+      membership?.user.email ?? id
+    } from it, leaving ${remaining} member${remaining === 1 ? "" : "s"}.`,
+  });
+
   return NextResponse.json({ ok: true });
 }

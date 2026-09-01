@@ -1,6 +1,10 @@
+import { headers } from "next/headers";
 import Link from "next/link";
 import { inspectInvitation } from "@/lib/invitationService";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
+import { recordThrottleOnce } from "@/lib/auth";
+import { consumeAll } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 import { AcceptForm } from "./AcceptForm";
 
 /**
@@ -13,6 +17,11 @@ import { AcceptForm } from "./AcceptForm";
  * exists to redeem. Whether it can still be redeemed is decided again, for
  * real, when the form posts to /api/invitations/accept; this page's only job
  * is choosing the right words in advance.
+ *
+ * This is the one rate-limited endpoint in Phase 6's slice that isn't a route
+ * handler, so it reads the caller's address with `next/headers` instead of
+ * from a Request, and counts it against `invitation:inspect:ip` before
+ * looking anything up.
  */
 export default async function InvitePage({
   params,
@@ -20,6 +29,14 @@ export default async function InvitePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+
+  const ip = clientIp(await headers());
+  const refusal = await consumeAll([["invitation:inspect:ip", ip]]);
+  if (refusal) {
+    await recordThrottleOnce({ bucket: refusal.bucket, subject: ip });
+    return <Throttled retryAfterSeconds={refusal.retryAfterSeconds} />;
+  }
+
   const invitation = await inspectInvitation(token);
 
   if (!invitation) return <DeadEnd state="invalid" />;
@@ -38,6 +55,30 @@ export default async function InvitePage({
       askForHouseholdName={invitation.askForHouseholdName}
       minLength={MIN_PASSWORD_LENGTH}
     />
+  );
+}
+
+/**
+ * What a caller sees after opening too many invitation links too quickly
+ * (§9, Phase 6).
+ *
+ * A Server Component page has no response object to hang a real 429 status
+ * and a Retry-After header on — that machinery is what Route Handlers are
+ * for, and /api/invitations/accept carries it. This is the same worded
+ * refusal the states below already use at a plain 200; the wait is still the
+ * useful fact, so it's said in the copy rather than a header nothing here
+ * could set.
+ */
+function Throttled({ retryAfterSeconds }: { retryAfterSeconds: number }) {
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  return (
+    <div className="card" style={{ maxWidth: 380, margin: "3rem auto" }}>
+      <h1>Too many attempts</h1>
+      <p style={{ color: "var(--muted)" }}>
+        This address has opened a lot of invitation links in a short time. Wait about {minutes}{" "}
+        minute{minutes === 1 ? "" : "s"} and try this link again.
+      </p>
+    </div>
   );
 }
 

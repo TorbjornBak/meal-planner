@@ -28,6 +28,13 @@ import { currentHouseholdContext } from "@/lib/currentUser";
  * validated field by field before anything is written, duplicates are skipped
  * rather than merged, the whole import is one transaction, and every recipe
  * stays editable afterwards.
+ *
+ * No cap here on the file's own size beyond next.config.mjs's
+ * `middlewareClientMaxBodySize` (11 MB): that's a deliberate choice, not a
+ * gap — a library export is JSON text, one household's own recipes, from a
+ * signed-in member re-importing what they already had, and a household with
+ * enough recipes to threaten an 11 MB text file would be a very well-fed one.
+ * Adding a tighter cap risks rejecting a real library for no security gain.
  */
 export async function POST(req: Request) {
   const context = await currentHouseholdContext();

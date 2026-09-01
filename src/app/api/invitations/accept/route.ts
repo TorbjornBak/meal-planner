@@ -4,11 +4,14 @@ import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
   createSession,
+  recordThrottleOnce,
   sessionCookieOptions,
 } from "@/lib/auth";
 import { currentUser } from "@/lib/currentUser";
 import { hashPassword, passwordProblem } from "@/lib/password";
-import { acceptInvitation } from "@/lib/invitationService";
+import { acceptInvitation, inspectInvitation } from "@/lib/invitationService";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 
 /**
  * POST /api/invitations/accept — spend an invitation (§9).
@@ -38,6 +41,28 @@ const LINK_PROBLEMS = new Set(["invalid-token", "expired", "revoked", "accepted"
 export async function POST(req: Request) {
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid" }, { status: 400 });
+
+  const ip = clientIp(req.headers);
+
+  // A read-only peek at the invitation, purely to learn the address it's
+  // bound to for the second rate-limit key below — never to decide anything
+  // about the acceptance itself, which acceptInvitation still re-checks for
+  // real further down. A token that doesn't resolve to a live invitation
+  // simply has no email to key on, the same way an unattributable caller has
+  // no IP: the key is skipped rather than folded into a shared bucket.
+  const invitation = await inspectInvitation(parsed.data.token);
+
+  const refusal = await consumeAll([
+    ["invitation:accept:ip", ip],
+    ["invitation:accept:email", invitation?.email ?? null],
+  ]);
+  if (refusal) {
+    await recordThrottleOnce({
+      bucket: refusal.bucket,
+      subject: refusal.bucket === "invitation:accept:email" ? (invitation?.email ?? null) : ip,
+    });
+    return tooManyRequests(refusal);
+  }
 
   // Hashed before the transaction: scrypt is deliberately slow, and holding a
   // database transaction open for it would serialise every other write behind
@@ -69,6 +94,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: result.error }, { status });
   }
 
+  // INVITATION_ACCEPTED and HOUSEHOLD_MEMBER_JOINED are recorded inside
+  // acceptInvitation itself, not here: that function already has the
+  // invitation's own household name and whether it just created that
+  // household in scope, from the same transaction that spent the token, which
+  // is a truer "at the point of the act" than a second lookup from this route
+  // could reconstruct.
   const token = await createSession(result.userId, result.householdId);
   const res = NextResponse.json({
     ok: true,

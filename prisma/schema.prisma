@@ -446,11 +446,21 @@ model Session {
   @@index([expiresAt])
 }
 
-/// What a one-time emailed link is for. Password reset and invitation are the
-/// same mechanism pointed at different copy; MAGIC_LINK is here so passwordless
+/// What a one-time emailed link is for. MAGIC_LINK is here so passwordless
 /// sign-in can be added without a migration.
 enum AuthTokenPurpose {
   PASSWORD_RESET
+  /// Retired in Phase 6. Invitations were once AuthTokens redeemed through
+  /// /reset, which is why this value exists; Phase 4 replaced them with the
+  /// Invitation model and /invite, and nothing has minted or redeemed one
+  /// since. The leftover unspent rows were deleted in migration
+  /// 20260901100000_retire_invite_auth_tokens.
+  ///
+  /// The value itself stays because Postgres cannot drop a member of an enum
+  /// type — there is no ALTER TYPE ... DROP VALUE — so removing it would mean
+  /// rebuilding the type and rewriting every column that uses it, which is a
+  /// great deal of risk to retire a word nothing reads. Treat it as reserved:
+  /// do not reuse it for something new, since old rows may still carry it.
   INVITE
   MAGIC_LINK
 }
@@ -470,6 +480,44 @@ model AuthToken {
   createdAt DateTime         @default(now())
 
   @@index([userId])
+  @@index([expiresAt])
+}
+
+/// One fixed window of one rate limit: how many times `subject` has tried
+/// `bucket` since `windowStart` (§9, Phase 6).
+///
+/// In the database rather than in a map in the process, because the limit has
+/// to survive the thing it is protecting against. A password-guessing script
+/// that can restart the container — or simply wait out a deploy — beats an
+/// in-memory counter without noticing it was there, and this app restarts on
+/// every push. It also means the limit is one limit, not one per worker.
+///
+/// A fixed window, not a sliding log, because the question being asked is
+/// "has this address been hammered in the last quarter hour?" and the cheapest
+/// honest answer is a counter with an expiry. The known cost of fixed windows —
+/// twice the nominal rate across a window boundary — is irrelevant at the rates
+/// that matter here, and the alternative stores a row per attempt.
+///
+/// `subject` is hashed rather than stored plainly. The rows are keyed by
+/// exactly the two things worth not writing down: the IP a person is sitting
+/// behind, and the email address they typed into a login form, including the
+/// addresses that turned out not to exist. A hash counts just as well and
+/// leaves a table that says nothing about who was here.
+model RateLimitCounter {
+  id          String   @id @default(cuid())
+  /// Which limit this is — "login:ip", "login:email", "invite:accept:ip".
+  bucket      String
+  /// SHA-256 of the IP address or normalized email being counted.
+  subject     String
+  /// Start of the window these attempts fall in; part of the key, so a new
+  /// window is a fresh insert rather than a read-modify-write of an old one.
+  windowStart DateTime
+  count       Int      @default(0)
+  /// When this row stops meaning anything. Rows are swept opportunistically
+  /// rather than by a scheduler: the limiter deletes what it trips over.
+  expiresAt   DateTime
+
+  @@unique([bucket, subject, windowStart])
   @@index([expiresAt])
 }
 
@@ -599,9 +647,45 @@ enum AuditAction {
   SMTP_TEST_SENT
   BACKUP_INITIALISED
   BACKUP_RUN_REQUESTED
+  /// A household admin offering their own kitchen to somebody, and changing
+  /// their mind. The counterpart to the two PLATFORM_ values above: same act,
+  /// different authority, and worth telling apart when reading the trail.
+  HOUSEHOLD_INVITATION_SENT
+  HOUSEHOLD_INVITATION_REVOKED
+  /// Somebody spent a link. The row that closes an invitation's story, and the
+  /// only one written by the person the trail is about rather than an admin.
+  INVITATION_ACCEPTED
+  /// A membership came into existence. HOUSEHOLD_MEMBER_REMOVED above is its
+  /// mirror; a roster you cannot reconstruct is not a roster you can audit.
+  HOUSEHOLD_MEMBER_JOINED
+  /// Credential changes, which is what an account takeover looks like from the
+  /// outside. Requesting a reset is recorded as well as completing one: the
+  /// request is the unauthenticated half, and a burst of them against one
+  /// address is the thing worth seeing.
+  PASSWORD_CHANGED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  /// A rate limit refused somebody. Not one row per failed password — that
+  /// would be a table of noise — but one when the limiter actually starts
+  /// turning attempts away, which is the point at which somebody should look.
+  AUTH_THROTTLED
+  /// The SSH key this instance authenticates to the backup host with was
+  /// generated or read. Deliberately not the Borg passphrase: that one is
+  /// generated in the browser and typed into .env by hand (§11), and never
+  /// reaches the server at all, so there is no server-side act to record.
+  /// This key is the credential that does cross the boundary, and minting it
+  /// is what grants this box write access to every archive.
+  BACKUP_KEY_ACCESSED
 }
 
-/// One thing a platform admin did, kept after the fact (§9c).
+/// One thing somebody did that is worth keeping after the fact (§9c).
+///
+/// It began as a record of platform-admin interventions, and that is still the
+/// sharpest case. Phase 6 widened it to the acts that matter when the app is
+/// reachable from the open internet: invitations, membership changes, password
+/// changes, and the moment a rate limit starts refusing somebody. The common
+/// thread is not who did it but whether anybody would want to reconstruct it
+/// afterwards.
 ///
 /// Every field that names somebody or something is stored twice: as a
 /// relation, which is convenient while the row it points at still exists, and
@@ -615,8 +699,9 @@ enum AuditAction {
 model AuditEvent {
   id            String      @id @default(cuid())
   action        AuditAction
-  /// The platform admin responsible. Null only for something the box did to
-  /// itself — a scheduled backup answering CRON_SECRET rather than a person.
+  /// Who was responsible. Null for something the box did to itself — a
+  /// scheduled backup answering CRON_SECRET — and for the unauthenticated
+  /// acts, where there is by definition no established identity to name.
   actorId       String?
   actor         User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   /// Snapshot of who they were, which outlives the account.

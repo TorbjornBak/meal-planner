@@ -523,6 +523,12 @@ function expiryLabel(expiresAt: string): string {
 
 interface AuditEvent {
   id: string;
+  // Kept as a union rather than `string` so a typo in a future action name
+  // fails here rather than rendering silently — but the screen below never
+  // switches on it: every action already reads as a plain sentence from
+  // `detail`, so a value missing from this list would still display
+  // correctly. It just wouldn't be caught by the compiler as a value this
+  // screen was told to expect.
   action:
     | "PLATFORM_INVITATION_SENT"
     | "PLATFORM_INVITATION_REVOKED"
@@ -530,7 +536,16 @@ interface AuditEvent {
     | "HOUSEHOLD_MEMBER_REMOVED"
     | "SMTP_TEST_SENT"
     | "BACKUP_INITIALISED"
-    | "BACKUP_RUN_REQUESTED";
+    | "BACKUP_RUN_REQUESTED"
+    | "HOUSEHOLD_INVITATION_SENT"
+    | "HOUSEHOLD_INVITATION_REVOKED"
+    | "INVITATION_ACCEPTED"
+    | "HOUSEHOLD_MEMBER_JOINED"
+    | "PASSWORD_CHANGED"
+    | "PASSWORD_RESET_REQUESTED"
+    | "PASSWORD_RESET_COMPLETED"
+    | "AUTH_THROTTLED"
+    | "BACKUP_KEY_ACCESSED";
   actorEmail: string | null;
   householdName: string | null;
   subjectEmail: string | null;

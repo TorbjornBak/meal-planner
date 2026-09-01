@@ -16,6 +16,19 @@ import { mondayOf } from "@/lib/newsletter";
  * Authenticated with CRON_SECRET rather than a session, so it can be called
  * from a script with no cookie jar. Idempotent per member per week, so a repeat
  * is safe: it retries whoever the scheduler couldn't reach and skips the rest.
+ *
+ * Deliberately not rate-limited (Phase 6). The endpoints that are — invitation
+ * issuing, the SMTP test button, a password change — are all reachable by
+ * somebody who only holds a session or a guessed address, so the limit is
+ * doing real work against a guessing run or a careless click. This one is
+ * gated by CRON_SECRET, a 256-bit-class value nobody is guessing, and its own
+ * idempotency already caps the damage a repeat can do: a retried tick sends
+ * nothing to a member who was already delivered to this week. What a counting
+ * window would add is a way to fail the one case this route exists for —
+ * catching up several missed weeks by hand, one `?weekStart=` at a time, while
+ * fixing a relay that was down — by refusing the fourth or fifth of them.
+ * There is no `newsletter-send` bucket in rateLimitPolicy.ts for exactly this
+ * reason; this is that decision written down, not an oversight.
  */
 export async function POST(req: Request) {
   const secret = process.env.CRON_SECRET;

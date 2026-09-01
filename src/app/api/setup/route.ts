@@ -9,9 +9,12 @@ import {
   looksLikeEmail,
   needsSetup,
   normalizeEmail,
+  recordThrottleOnce,
   sessionCookieOptions,
 } from "@/lib/auth";
 import { hashPassword, passwordProblem } from "@/lib/password";
+import { consumeAll, tooManyRequests } from "@/lib/rateLimit";
+import { clientIp } from "@/lib/rateLimitPolicy";
 
 const Input = z.object({
   email: z.string().min(1).max(320),
@@ -50,6 +53,16 @@ function isSetupRace(error: unknown): boolean {
 export async function POST(req: Request) {
   if (!(await needsSetup())) {
     return NextResponse.json({ error: "already-set-up" }, { status: 409 });
+  }
+
+  // Only after the instance is already closed does this stop mattering; while
+  // it's open, this is the one window in the whole app an anonymous caller can
+  // use to create an account, so it gets the same treatment as login.
+  const ip = clientIp(req.headers);
+  const refusal = await consumeAll([["setup:ip", ip]]);
+  if (refusal) {
+    await recordThrottleOnce({ bucket: refusal.bucket, subject: ip });
+    return tooManyRequests(refusal);
   }
 
   const parsed = Input.safeParse(await req.json().catch(() => null));

@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { generateToken, hashToken, normalizeEmail } from "@/lib/auth";
 import { householdInviteEmail, platformInviteEmail } from "@/lib/emails";
 import { MailNotConfiguredError, appUrl, isMailConfigured, sendMail } from "@/lib/mail";
+import { recordAudit } from "@/lib/audit";
 import {
   type AcceptancePlan,
   type AcceptanceRefusal,
@@ -321,6 +322,46 @@ export type AcceptResult =
   | { ok: true; userId: string; householdId: string; plan: AcceptancePlan }
   | { ok: false; error: AcceptFailure };
 
+/**
+ * The sentence recorded when a link is spent (§9c, Phase 6).
+ *
+ * A pure function of the outcome, kept separate from acceptInvitation for the
+ * reason invitations.ts is separate from this file: the wording has three
+ * genuinely different shapes — a new household created, an existing one
+ * joined, or a link reopened on a membership that was already there — and a
+ * table of examples is what src/lib/invitationService.test.mjs checks against
+ * without a database.
+ */
+export function acceptanceDetail(opts: {
+  email: string;
+  householdName: string;
+  householdCreated: boolean;
+  plan: AcceptancePlan;
+}): string {
+  if (opts.plan === "already-a-member") {
+    return `${opts.email} reopened an invitation to ${opts.householdName}, which they already belonged to.`;
+  }
+  if (opts.householdCreated) {
+    return `${opts.email} accepted an invitation and created ${opts.householdName}.`;
+  }
+  return `${opts.email} accepted an invitation and joined ${opts.householdName} as an admin.`;
+}
+
+/**
+ * The sentence recorded when accepting actually seats somebody at the table —
+ * every case above except `already-a-member`, where the membership already
+ * existed and nothing new came into being.
+ */
+export function membershipJoinedDetail(opts: {
+  email: string;
+  householdName: string;
+  householdCreated: boolean;
+}): string {
+  return opts.householdCreated
+    ? `${opts.email} became the first admin of ${opts.householdName}.`
+    : `${opts.email} joined ${opts.householdName} as an admin, via invitation.`;
+}
+
 /** Thrown inside the transaction to roll it back when the claim is lost. */
 class LostClaimError extends Error {}
 
@@ -353,6 +394,7 @@ export async function acceptInvitation(opts: {
 
   const invitation = await prisma.invitation.findUnique({
     where: { tokenHash: await hashToken(opts.token) },
+    include: { household: { select: { name: true } } },
   });
   if (!invitation) return { ok: false, error: "invalid-token" };
 
@@ -468,6 +510,40 @@ export async function acceptInvitation(opts: {
 
       return { userId: user.id, householdId };
     });
+
+    // Acceptance is unauthenticated by nature — a link is the credential, not a
+    // session — so there is no actor to name; the record leans on the address
+    // the invitation was bound to and the sentence itself. Two rows, not one:
+    // INVITATION_ACCEPTED closes the invitation's own story (it fires even for
+    // `already-a-member`, where a link was reopened but nothing new was
+    // seated), and HOUSEHOLD_MEMBER_JOINED is the mirror of
+    // HOUSEHOLD_MEMBER_REMOVED — a roster line, written only when one actually
+    // appeared. Awaited, not fired-and-forgotten: recordAudit already swallows
+    // its own errors, so awaiting costs nothing and losing the promise would
+    // risk an unhandled rejection if that ever changed.
+    const householdCreated = invitation.householdId === null;
+    const householdName = invitation.household?.name ?? newHouseholdName ?? "Household";
+
+    await recordAudit({
+      action: "INVITATION_ACCEPTED",
+      subjectEmail: invitation.email,
+      household: { id: result.householdId, name: householdName },
+      detail: acceptanceDetail({
+        email: invitation.email,
+        householdName,
+        householdCreated,
+        plan,
+      }),
+    });
+
+    if (plan !== "already-a-member") {
+      await recordAudit({
+        action: "HOUSEHOLD_MEMBER_JOINED",
+        subjectEmail: invitation.email,
+        household: { id: result.householdId, name: householdName },
+        detail: membershipJoinedDetail({ email: invitation.email, householdName, householdCreated }),
+      });
+    }
 
     return { ok: true, plan, ...result };
   } catch (error) {

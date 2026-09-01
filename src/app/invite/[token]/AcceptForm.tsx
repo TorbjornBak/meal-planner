@@ -89,6 +89,10 @@ export function AcceptForm(props: {
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (res.status === 429) {
+          setError("Too many attempts. Wait a bit and try again.");
+          return;
+        }
         if (body.error === "email-mismatch") {
           setMismatch(true);
           return;

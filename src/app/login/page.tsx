@@ -24,6 +24,10 @@ function LoginForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
+      if (res.status === 429) {
+        setError("Too many attempts. Wait a bit and try again.");
+        return;
+      }
       if (!res.ok) {
         setError("That email and password don't match.");
         return;

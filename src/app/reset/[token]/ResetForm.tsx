@@ -4,20 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Choose a new password against a one-time emailed link (§9).
+ * Choose a new password against a one-time emailed reset link (§9).
  *
- * Serves both resets and invitations — the same token machinery, so the only
- * difference is the wording and which purpose the server is asked to redeem.
  * `minLength` is passed down from the server so the hint here can't drift out
  * of step with what src/lib/password.ts actually enforces.
  */
 export function ResetForm({
   token,
-  purpose,
   minLength,
 }: {
   token: string;
-  purpose: "PASSWORD_RESET" | "INVITE";
   minLength: number;
 }) {
   const router = useRouter();
@@ -25,8 +21,6 @@ export function ResetForm({
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const isInvite = purpose === "INVITE";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,17 +36,19 @@ export function ResetForm({
       const res = await fetch("/api/password/reset", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, password, purpose }),
+        body: JSON.stringify({ token, password }),
       });
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setError(
-          body.error === "weak-password"
-            ? body.message
-            : body.error === "invalid-token"
-              ? "This link has expired or has already been used. Ask for a new one."
-              : "Something went wrong. Try again.",
+          res.status === 429
+            ? "Too many attempts. Wait a bit and try again."
+            : body.error === "weak-password"
+              ? body.message
+              : body.error === "invalid-token"
+                ? "This link has expired or has already been used. Ask for a new one."
+                : "Something went wrong. Try again.",
         );
         return;
       }
@@ -67,10 +63,7 @@ export function ResetForm({
 
   return (
     <div className="card" style={{ maxWidth: 380, margin: "3rem auto" }}>
-      <h1>{isInvite ? "Welcome to MealPlanner" : "Choose a new password"}</h1>
-      {isInvite && (
-        <p style={{ color: "var(--muted)" }}>Pick a password and you&apos;re in.</p>
-      )}
+      <h1>Choose a new password</h1>
       <form onSubmit={submit}>
         <label>
           New password
@@ -102,7 +95,7 @@ export function ResetForm({
         </p>
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
         <button type="submit" disabled={busy} style={{ marginTop: 12 }}>
-          {busy ? "Saving…" : isInvite ? "Set password and sign in" : "Save new password"}
+          {busy ? "Saving…" : "Save new password"}
         </button>
       </form>
     </div>
