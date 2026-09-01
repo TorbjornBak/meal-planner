@@ -132,17 +132,22 @@ build` are all unaffected — see below.
 | `APP_URL` | Fatal | Fatal | Fatal if it doesn't parse as a URL, or isn't `https://` |
 | `DATABASE_URL` | Fatal, including blank credentials | Fatal if either credential is still `mealplanner` | Fatal if it doesn't parse |
 | `CRON_SECRET` | Fatal | Fatal | Fatal (< 20 characters) |
-| `BORG_REPO` | Fatal | — | — |
-| `BORG_PASSPHRASE` | Fatal | Fatal | Fatal (< 20 characters) |
+| `BORG_REPO` | — (backups simply off) | — | — |
+| `BORG_PASSPHRASE` | Fatal **only if `BORG_REPO` is set** | Fatal if `BORG_REPO` is set | Fatal (< 20 characters) if `BORG_REPO` is set |
 
 A few of these are worth spelling out:
 
-- **The operational secrets and backup destination are mandatory in
-  production.** An unset `CRON_SECRET` does make both bearer endpoints refuse
-  requests, and an unset `BORG_REPO` makes the scheduler idle, but either state
-  leaves a required production operation unavailable. Local development and
-  tests may still omit them; the boot check is production-only. The example
-  secrets are public in this repository and are rejected too.
+- **`CRON_SECRET` is mandatory in production; a backup destination is not.**
+  An unset `CRON_SECRET` leaves both bearer endpoints refusing requests, which
+  is a required production operation unavailable. Backups are different: an
+  unset `BORG_REPO` simply means the box does not back up, which is a judgement
+  about what the data is worth and belongs to whoever runs it. Refusing to boot
+  over it would leave an unconfigured box with no data to lose because it never
+  starts. What *is* fatal is naming a repository and then guarding it badly —
+  once `BORG_REPO` is set, `BORG_PASSPHRASE` must be present, not the public
+  placeholder, and long enough to be worth having. Local development and tests
+  may omit all of it; the boot check is production-only. The example secrets
+  are public in this repository and are rejected too.
 - **Default database credentials are treated as fatal, not a warning.**
   `docker-compose.yml` defaults `POSTGRES_USER`/`POSTGRES_PASSWORD` to
   `mealplanner`/`mealplanner` so a first `docker compose up` needs no setup —
@@ -334,8 +339,8 @@ If that line is missing, `docker compose logs app | grep backup` will say why
 
 | Variable | Default | |
 | --- | --- | --- |
-| `BORG_REPO` | — | Required. Where the archives go. |
-| `BORG_PASSPHRASE` | — | Required. Keep a copy off the box. |
+| `BORG_REPO` | — | Where the archives go. Unset means no backups. |
+| `BORG_PASSPHRASE` | — | Required once `BORG_REPO` is set. Keep a copy off the box. |
 | `BACKUP_HOUR` | `3` | `0`–`23`, a wall clock in `BACKUP_TIMEZONE`. |
 | `BACKUP_TIMEZONE` | `Europe/Copenhagen` | Falls back to `TZ`. |
 | `BACKUP_SCHEDULER` | `on` | `off` to stop backing up on its own. |

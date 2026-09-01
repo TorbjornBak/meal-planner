@@ -280,26 +280,42 @@ function checkCronSecret(env: NodeJS.ProcessEnv, findings: StartupFinding[]): vo
   );
 }
 
+/**
+ * Whether the backup configuration is *coherent* — not whether it exists.
+ *
+ * Running without backups is a supported way to run this app, and everything
+ * else already says so: the scheduler in src/instrumentation.ts logs "not
+ * configured … nothing is being backed up" and idles, and the settings screen
+ * says it in plainer words than a log line could. This check used to disagree
+ * and refuse to start at all, which made an unconfigured box impossible to
+ * boot rather than merely unbacked-up — a strictly worse outcome, since a box
+ * that will not start has no data to lose and no way to be given any. Wanting
+ * backups is a judgement about how much the data is worth, and that judgement
+ * belongs to whoever runs the box, not to this file.
+ *
+ * What is *not* a judgement call is a repository configured with a passphrase
+ * that cannot protect it. So the rule turns on BORG_REPO: with no repository
+ * there is nothing to get wrong and nothing is said, and once a repository is
+ * named the passphrase guarding it must be real — present, not the public
+ * placeholder, and long enough to be worth having. A passphrase set with no
+ * repository is inert and left alone; it is somebody halfway through
+ * configuring backups, not a mistake.
+ */
 function checkBorgPassphrase(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
   const repo = env.BORG_REPO?.trim() ?? "";
   const passphrase = env.BORG_PASSPHRASE ?? "";
 
-  if (!repo) {
-    findings.push({
-      variable: "BORG_REPO",
-      severity: "fatal",
-      message:
-        "BORG_REPO is not set. A production installation must have a backup destination before it starts; " +
-        "configure the repository described in README.md under Backups.",
-    });
-  }
+  // No repository named: backups are off, which is a choice, not a fault.
+  if (!repo) return;
+
   if (!passphrase) {
     findings.push({
       variable: "BORG_PASSPHRASE",
       severity: "fatal",
       message:
-        "BORG_PASSPHRASE is not set. Generate a strong passphrase, store a copy off the box, and configure " +
-        "it before production starts.",
+        "BORG_PASSPHRASE is not set on a configured repository (BORG_REPO is set). Generate a strong " +
+        "passphrase, store a copy off the box, and configure it — or unset BORG_REPO to run without " +
+        "backups.",
     });
     return;
   }

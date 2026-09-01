@@ -291,6 +291,19 @@ still that origin, rather than pattern-matching the separators and encodings
 that behave this way. This mattered more after the invitation fix than before
 it, since the invite flow now routes existing accounts through `/login?next=`.
 
+### Corrected after the gate
+
+- **A missing backup destination no longer refuses to start.** The Phase 6
+  startup check made `BORG_REPO` and `BORG_PASSPHRASE` fatal in production,
+  which contradicted the rest of the app: the scheduler in
+  `src/instrumentation.ts` treats unconfigured backups as "not an error — an
+  instance can be run without backups" and idles, and the settings screen says
+  the same. The check won, so a box with no Borg repository could not boot at
+  all — an unbacked-up box became a box with no data to lose because it never
+  ran. Backups are now off when `BORG_REPO` is unset. What stayed fatal is the
+  incoherent case: once a repository is named, its passphrase must be present,
+  not the public placeholder, and long enough to be worth having.
+
 ### Accepted, not fixed
 
 - **`PATCH /api/account` answers `email-taken`**, which tells a signed-in caller
