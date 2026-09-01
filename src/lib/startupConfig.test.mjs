@@ -188,11 +188,29 @@ test("CRON_SECRET present, long and not the placeholder has no finding", () => {
 
 // --- BORG_PASSPHRASE -----------------------------------------------------
 
-test("production backup configuration is required", () => {
+test("running without backups configured is allowed, not fatal", () => {
+  // Backups are a judgement about what the data is worth, and the box's to
+  // make. The scheduler already idles and says so; refusing to start would
+  // mean an unconfigured box has no data to lose because it never runs.
   const findings = findStartupProblems(
     validEnv({ BORG_REPO: undefined, BORG_PASSPHRASE: undefined }),
   ).filter((finding) => finding.variable === "BORG_REPO" || finding.variable === "BORG_PASSPHRASE");
-  assert.deepEqual(findings.map((finding) => finding.variable), ["BORG_REPO", "BORG_PASSPHRASE"]);
+  assert.deepEqual(findings, []);
+});
+
+test("a passphrase set with no repository is inert, not a finding", () => {
+  const findings = findStartupProblems(
+    validEnv({ BORG_REPO: undefined, BORG_PASSPHRASE: "d".repeat(32) }),
+  ).filter((finding) => finding.variable === "BORG_REPO" || finding.variable === "BORG_PASSPHRASE");
+  assert.deepEqual(findings, []);
+});
+
+test("the public placeholder passphrase is ignored while no repository is named", () => {
+  // It cannot leak an archive that is not being written anywhere.
+  const findings = findStartupProblems(
+    validEnv({ BORG_REPO: undefined, BORG_PASSPHRASE: "change-me-to-a-long-random-string" }),
+  ).filter((finding) => finding.variable === "BORG_PASSPHRASE");
+  assert.deepEqual(findings, []);
 });
 
 test("BORG_REPO set with BORG_PASSPHRASE unset is fatal", () => {
