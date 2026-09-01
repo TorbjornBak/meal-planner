@@ -145,7 +145,7 @@ Three things turned up that the plan had not anticipated, all now fixed:
   this account last Tuesday?" stays answerable. Verified against a real
   database that live sessions and in-grace tokens survive it.
 
-## Phase 6 — what remains
+## Phase 6 — the closing items (all done)
 
 - [x] **Dependency vulnerabilities.** Next.js was updated from 15.5.20 to
       15.5.25, Sharp from 0.35.3 to 0.35.4, and nanoid to 3.3.18. npm overrides
