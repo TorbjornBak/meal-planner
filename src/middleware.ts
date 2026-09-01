@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, getSessionUser, needsSetup } from "@/lib/auth";
 import { csrfVerdict, expectedOrigin } from "@/lib/csrf";
+import { isPublicPage } from "@/lib/publicPages";
 import { httpsIsGuaranteed, securityHeaders } from "@/lib/securityHeaders";
 
 /**
@@ -23,24 +24,29 @@ export const runtime = "nodejs";
 /** Routes reachable without a session, because they're how you get one. */
 function isPublic(pathname: string): boolean {
   return (
-    pathname === "/login" ||
+    // The pages: the landing page, the sign-in and password-reset flow, the
+    // invitation pages, first-run setup. Kept in src/lib/publicPages.ts
+    // because src/components/TopNav.tsx has to gate on the same list — a page
+    // this function lets through anonymously must not be a page that draws a
+    // nav bar of links to somewhere anonymous callers can't go.
+    isPublicPage(pathname) ||
+    // The endpoints behind those pages. The page half and the API half are
+    // separate lists on purpose: the whole reason /api/login is open is that
+    // it is how you *stop* being anonymous, and that is not a property the
+    // nav bar or anything else should infer from a page being public.
     pathname === "/api/login" ||
-    pathname === "/forgot" ||
     pathname === "/api/password/forgot" ||
     pathname === "/api/password/reset" ||
-    pathname.startsWith("/reset/") ||
     // Accepting an invitation is the one way into the app for somebody with no
     // account at all, so the page and the endpoint that spends the link both
     // have to answer without a session. The link itself is the credential:
     // hashed, single-use, seven days, bound to one address (§9).
-    pathname.startsWith("/invite/") ||
     pathname === "/api/invitations/accept" ||
     // First-run bootstrap: a fresh deployment has nobody to sign in as. The
     // route closes itself the moment an account exists (needsSetup in
     // src/lib/auth.ts, checked inside src/app/api/setup/route.ts on every
     // call) — this entry only has to stay open, not stay safe, since the
     // route re-derives "safe" for itself on every request.
-    pathname === "/setup" ||
     pathname === "/api/setup" ||
     // One-click unsubscribe has to work straight from a mail client, which
     // carries no session (§9b). It authenticates with its own `t` parameter
@@ -48,7 +54,6 @@ function isPublic(pathname: string): boolean {
     // src/lib/auth.ts), and it's a GET, so it never reaches the CSRF check
     // below regardless.
     pathname === "/api/newsletter/unsubscribe" ||
-    pathname === "/newsletter/unsubscribed" ||
     // The weekly send is triggered by cron and authenticates with CRON_SECRET
     // instead of a cookie (§9b).
     pathname === "/api/newsletter/send" ||
@@ -183,7 +188,11 @@ export async function middleware(req: NextRequest) {
 
   url.pathname = "/login";
   // So signing in lands you where you were headed rather than the dashboard.
-  if (pathname !== "/") url.searchParams.set("next", pathname + req.nextUrl.search);
+  // Unconditional now that the landing page is public: every path that still
+  // reaches this line is a page worth being returned to, where it used to have
+  // to make an exception for "/" — which was the dashboard, and which nobody
+  // wants to be sent back to as if they had asked for it specifically.
+  url.searchParams.set("next", pathname + req.nextUrl.search);
   return finish(NextResponse.redirect(url));
 }
 

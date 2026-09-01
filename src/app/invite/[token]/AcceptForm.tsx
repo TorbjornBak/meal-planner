@@ -125,7 +125,7 @@ export function AcceptForm(props: {
 
       // Accepting signs us in and makes the joined household the active one,
       // so go straight into the app rather than back to a login form.
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     } finally {
       setBusy(false);
@@ -277,7 +277,7 @@ export function AcceptForm(props: {
 
       {plan === "already-a-member" && (
         <p style={{ marginTop: 12 }}>
-          <Link href="/">Or just go home</Link>
+          <Link href="/dashboard">Or just go home</Link>
         </p>
       )}
     </div>

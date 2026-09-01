@@ -885,3 +885,70 @@ table {
   white-space: nowrap;
   border: 0;
 }
+
+/* --- Landing page (§10) ----------------------------------------------------- */
+
+/*
+ * The one page with no nav bar above it, so it carries its own top margin —
+ * and the one page a stranger might read rather than use, so the measure is
+ * narrower than the app's 780px container and the text is centred. Everything
+ * here is the app's existing type and colour; a front door that looked like a
+ * different product than the thing behind it would be its own kind of lie.
+ */
+.landing {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: 3rem 0 2rem;
+  text-align: center;
+}
+
+.landing-title {
+  margin: 0;
+  font-size: 2.25rem;
+  letter-spacing: -0.02em;
+}
+
+/* The one line that says what this is, so it reads as a subtitle of the name
+   rather than as the first sentence of a paragraph. */
+.landing-lede {
+  margin: 0.35rem 0 1.75rem;
+  font-size: 1.15rem;
+  color: var(--muted);
+}
+
+.landing-body {
+  margin: 0 0 1.75rem;
+  text-align: left;
+}
+
+.landing-cta {
+  margin: 0 0 1.75rem;
+}
+
+/*
+ * The only filled control in the app, and it can afford to be: this page has
+ * exactly one thing to press, and a stranger who has just read four sentences
+ * shouldn't have to work out which of the words is the door.
+ */
+.cta {
+  display: inline-block;
+  min-height: 44px;
+  padding: 0.6rem 1.4rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--card);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.cta:hover {
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+.landing-note {
+  margin: 0 0 0.9rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-align: left;
+}

@@ -54,7 +54,7 @@ export default function SetupPage() {
         return;
       }
 
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     } finally {
       setBusy(false);

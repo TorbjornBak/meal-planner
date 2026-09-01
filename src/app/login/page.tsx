@@ -39,7 +39,12 @@ function LoginForm() {
       // someone straight off the tailnet to somewhere else. The check lives in
       // safeNextPath because "starts with / but not //" is not enough: a
       // browser reads `/\evil.com` as another origin entirely.
-      router.push(safeNextPath(params.get("next"), window.location.origin));
+      //
+      // The fallback is the dashboard rather than safeNextPath's own "/",
+      // which is the public landing page: somebody who has just typed a
+      // password is asking to be in the app, not to be shown the door they
+      // came through.
+      router.push(safeNextPath(params.get("next"), window.location.origin, "/dashboard"));
       router.refresh();
     } finally {
       setBusy(false);
