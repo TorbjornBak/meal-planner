@@ -1,8 +1,8 @@
 /**
  * Fetching a recipe *page* from the open web — the paste-a-URL import path.
  *
- * This is the fast path in §1: instead of the bookmarklet sending page HTML
- * from your browser, the server fetches it given a URL you paste. It reuses
+ * This is the fast path in §1: the server fetches a URL you paste or hand it
+ * through the bookmarklet. It reuses
  * the same private-network guard as the image fetch (`guardedFetch`, built on
  * `resolvePublicUrl` in `image.ts`) so a pasted URL can't be used to probe
  * the host's own network — including its redirects, which `guardedFetch`
@@ -11,8 +11,7 @@
  *
  * Best-effort by design: many sites (bot protection, JS-only rendering, login
  * walls) won't yield a recipe to a plain server fetch. Every failure returns
- * null so the caller can fall back to the bookmarklet, which always works
- * because it's your real, logged-in browser.
+ * null so the caller can fall back to hand-pasted recipe text.
  */
 
 import { guardedFetch, readCapped } from "./image";
@@ -38,7 +37,7 @@ export async function fetchPageHtml(rawUrl: string): Promise<FetchedPage | null>
         // Recipe sites commonly 403 non-browser clients. This is a low-volume,
         // user-initiated fetch of a page they're about to read anyway, so we
         // present as a normal browser; sites that still block fall back to the
-        // bookmarklet.
+        // hand-pasted recipe text.
         "user-agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
           "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -68,8 +67,8 @@ export async function fetchPageHtml(rawUrl: string): Promise<FetchedPage | null>
 
     return { html, finalUrl: res.url || rawUrl };
   } catch {
-    // Dead link, timeout, DNS failure, TLS error — all just mean "use the
-    // bookmarklet".
+    // Dead link, timeout, DNS failure, TLS error — all just mean "paste the
+    // recipe text instead".
     return null;
   }
 }

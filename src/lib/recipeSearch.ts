@@ -9,7 +9,7 @@
  * substring test, no index, no service. The whole library is a few hundred
  * rows and `GET /api/recipes` already ships every recipe's ingredients, so the
  * search runs in the browser — no request per keystroke, and it still works
- * offline over Tailscale (§10).
+ * offline when the app is temporarily unreachable (§10).
  */
 
 export interface SearchableRecipe {

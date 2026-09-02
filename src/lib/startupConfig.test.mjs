@@ -20,7 +20,7 @@ function validEnv(overrides = {}) {
   return {
     NODE_ENV: "production",
     AUTH_SECRET: "a".repeat(32),
-    APP_URL: "https://box.example-tailnet.ts.net",
+    APP_URL: "https://mealplanner.example.org",
     DATABASE_URL: "postgresql://realuser:realpassword@db:5432/mealplanner?schema=public",
     CRON_SECRET: "b".repeat(32),
     BORG_REPO: "ssh://u123456@u123456.your-storagebox.de:23/./mealplanner",
@@ -90,7 +90,7 @@ test("APP_URL that doesn't parse as a URL is fatal", () => {
 });
 
 test("APP_URL over plain http in production is fatal", () => {
-  const findings = findingsFor("APP_URL", validEnv({ APP_URL: "http://box.example-tailnet.ts.net" }));
+  const findings = findingsFor("APP_URL", validEnv({ APP_URL: "http://mealplanner.example.org" }));
   assert.equal(findings.length, 1);
   assert.equal(findings[0].severity, "fatal");
   assert.match(findings[0].message, /not https/);
@@ -101,7 +101,7 @@ test("APP_URL over https has no finding", () => {
 });
 
 test("APP_URL left at the .env.example hostname is fatal", () => {
-  const findings = findingsFor("APP_URL", validEnv({ APP_URL: "https://box.your-tailnet.ts.net" }));
+  const findings = findingsFor("APP_URL", validEnv({ APP_URL: "https://mealplanner.example.com" }));
   assert.equal(findings.length, 1);
   assert.match(findings[0].message, /example/);
 });

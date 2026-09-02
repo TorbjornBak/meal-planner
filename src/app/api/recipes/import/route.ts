@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  photoTargetsForImport,
   parseTransferFile,
   planImport,
   toRecipeCreateData,
@@ -77,19 +78,44 @@ export async function POST(req: Request) {
   // you'd be left guessing which recipes landed, and re-running the file to
   // find out is exactly what the duplicate check can't fully protect you from
   // if the first attempt half-succeeded.
-  if (toCreate.length) {
-    await prisma.$transaction(
-      toCreate.map((recipe) =>
-        prisma.recipe.create({
-          data: { ...toRecipeCreateData(recipe), householdId },
-        }),
-      ),
-    );
-  }
+  const created = toCreate.length
+    ? await prisma.$transaction(
+        toCreate.map((recipe) =>
+          prisma.recipe.create({
+            data: { ...toRecipeCreateData(recipe), householdId },
+            select: { id: true },
+          }),
+        ),
+      )
+    : [];
+
+  // Do not load every image blob just to find missing ones. Image bytes can be
+  // substantial, whereas this narrow query only needs rows that may be retried.
+  const existingWithoutImage = skipped.length
+    ? await prisma.recipe.findMany({
+        where: { householdId, image: null },
+        select: { id: true, name: true, source: true },
+      })
+    : [];
+
+  // Photos do not travel in exports (§2b), so fetch them separately after the
+  // transaction. Returning IDs lets the browser reuse the single-recipe image
+  // endpoint and avoids keeping this bulk request open while remote sites load.
+  // Pictureless duplicates are included too: re-running an old export can
+  // repair recipes imported before this pass existed.
+  const photoTargets = photoTargetsForImport({
+    created: created.map((recipe, index) => ({ id: recipe.id, source: toCreate[index].source })),
+    skipped,
+    existing: existingWithoutImage.map((recipe) => ({
+      ...recipe,
+      hasImage: false,
+    })),
+  });
 
   return NextResponse.json({
     imported: toCreate.length,
     skipped: skipped.length,
+    photoTargets,
     // Named, not just counted. "12 skipped" invites the question this answers,
     // and the answer is short enough to give unprompted. Capped because the
     // whole point of a cap is the pathological file, not the ordinary one.

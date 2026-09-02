@@ -82,18 +82,18 @@ test("base-uri and form-action don't fall back to default-src's leniency", () =>
 
 test("HSTS is guaranteed-safe only under production plus an https APP_URL", () => {
   assert.equal(
-    httpsIsGuaranteed({ nodeEnv: "production", appUrl: "https://box.example.ts.net" }),
+    httpsIsGuaranteed({ nodeEnv: "production", appUrl: "https://mealplanner.example.com" }),
     true,
   );
 });
 
 test("HSTS is withheld outside production even with an https APP_URL", () => {
   assert.equal(
-    httpsIsGuaranteed({ nodeEnv: "development", appUrl: "https://box.example.ts.net" }),
+    httpsIsGuaranteed({ nodeEnv: "development", appUrl: "https://mealplanner.example.com" }),
     false,
   );
   assert.equal(
-    httpsIsGuaranteed({ nodeEnv: undefined, appUrl: "https://box.example.ts.net" }),
+    httpsIsGuaranteed({ nodeEnv: undefined, appUrl: "https://mealplanner.example.com" }),
     false,
   );
 });

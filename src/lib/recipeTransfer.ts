@@ -392,3 +392,70 @@ export function planImport(
 
   return { toCreate, skipped };
 }
+
+/** A stored recipe that can be retried by the post-import photo pass. */
+export interface ExistingRecipeForPhotoTarget {
+  id: string;
+  name: string;
+  source: string | null;
+  hasImage: boolean;
+}
+
+/** A freshly created recipe and the source that came from the transfer file. */
+export interface CreatedRecipeForPhotoTarget {
+  id: string;
+  source: string | null;
+}
+
+/**
+ * Find the recipes whose source pages are worth asking for a photo after a
+ * library import.
+ *
+ * Transfer files deliberately contain no image bytes. Freshly-created recipes
+ * therefore always need a try when their source is an http(s) URL. Recipes
+ * skipped as duplicates normally do not, except when the matching stored row
+ * has no image: re-importing the same export then becomes a safe way to repair
+ * imports made before this photo pass existed.
+ */
+export function photoTargetsForImport({
+  created,
+  skipped,
+  existing,
+}: {
+  created: Iterable<CreatedRecipeForPhotoTarget>;
+  skipped: Iterable<TransferRecipeWithLines>;
+  existing: Iterable<ExistingRecipeForPhotoTarget>;
+}): string[] {
+  const targets = new Set<string>();
+  const existingWithoutImage = new Map<string, ExistingRecipeForPhotoTarget>();
+
+  for (const recipe of existing) {
+    if (!recipe.hasImage) {
+      existingWithoutImage.set(transferKey(recipe.name, recipe.source), recipe);
+    }
+  }
+
+  for (const recipe of created) {
+    if (isFetchableSource(recipe.source)) targets.add(recipe.id);
+  }
+
+  for (const recipe of skipped) {
+    const existingRecipe = existingWithoutImage.get(transferKey(recipe.name, recipe.source));
+    if (existingRecipe && isFetchableSource(existingRecipe.source)) {
+      targets.add(existingRecipe.id);
+    }
+  }
+
+  return [...targets];
+}
+
+/** Whether a recipe's source is an http(s) page that can offer a photo. */
+export function isFetchableSource(source: string | null | undefined): boolean {
+  if (!source) return false;
+  try {
+    const url = new URL(source.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}

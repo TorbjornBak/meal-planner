@@ -46,8 +46,8 @@ function isSetupRace(error: unknown): boolean {
  *
  * Open to anyone, but only while the instance has no accounts at all. The
  * moment one exists this route is closed for good and further members arrive
- * by invitation. On a home box behind Tailscale (§10) the window is only
- * reachable from the tailnet anyway.
+ * by invitation. The deployment's reverse proxy and HTTPS boundary protect
+ * the public setup endpoint while it is open (§10).
  */
 export async function POST(req: Request) {
   if (!(await needsSetup())) {

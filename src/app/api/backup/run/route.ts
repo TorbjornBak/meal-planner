@@ -13,7 +13,7 @@ import { serializeRun, takeBackup } from "@/lib/backups";
  * upgrade — and, for anyone who'd rather drive it from the host, a script:
  *
  *   curl -sS -X POST -H "Authorization: Bearer $CRON_SECRET" \
- *     https://box.example.ts.net/api/backup/run
+ *     https://mealplanner.example.com/api/backup/run
  *
  * A session or CRON_SECRET will do, the second so it works with no cookie jar.
  *

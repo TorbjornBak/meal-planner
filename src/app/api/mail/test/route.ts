@@ -11,7 +11,7 @@ import { describeMailError } from "@/lib/mailError";
  * Connects and authenticates without sending anything, so it isolates "can we
  * reach the mail server at all" from "was the message accepted". The real
  * error is returned rather than flattened to "couldn't send": everyone with a
- * session here is a household member on the tailnet (§10), and the person
+ * session here is a household member (§10), and the person
  * looking at this screen is the person who can go and fix the setting.
  */
 export async function POST() {

@@ -188,7 +188,7 @@ export function decide(count: number, limit: Limit, now: number, windowStart: Da
  * is whatever the client claimed and is worth nothing — a header anybody can
  * write. The *rightmost* entry is the one appended by the hop nearest us,
  * which for this deployment is the single trusted terminator in front of the
- * app (`tailscale serve`, or the Caddy that fronts the public name), and is
+ * app (the Caddy reverse proxy that fronts the public name), and is
  * therefore the last value an outsider cannot forge.
  *
  * That reasoning holds only for exactly one trusted hop. Putting a second

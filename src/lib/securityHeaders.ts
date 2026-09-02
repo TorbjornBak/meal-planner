@@ -178,8 +178,7 @@ export function securityHeaders(input: SecurityHeadersInput): [string, string][]
 
   if (input.httpsGuaranteed) {
     // Six months, not the two years a preload-list submission wants — this
-    // box was never going into that list (§10: a tailnet name, not a public
-    // domain meant to be pinned in every browser on earth), so there is no
+    // the deployment does not need preload-list duration (§10), so there is no
     // reason to pick the longer, harder-to-walk-back number.
     headers.push(["Strict-Transport-Security", "max-age=15552000; includeSubDomains"]);
   }

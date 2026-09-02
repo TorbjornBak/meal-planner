@@ -58,7 +58,7 @@ async function door(): Promise<Door> {
  * The front door (§9, §10).
  *
  * Everything else in this app is behind an account, which was fine when the
- * only way to type this address was to be on the tailnet. On the public
+ * installation was only reachable on a private network. On the public
  * internet somebody reaches the bare domain without an account and without
  * context, and the honest thing to show them is what this is, followed by the
  * one door there is — rather than a login form for an app they have no way to
@@ -75,51 +75,117 @@ export default async function LandingPage() {
 
   return (
     <div className="landing">
-      <h1 className="landing-title">MealPlanner</h1>
-      <p className="landing-lede">
-        Household dinners → shopping list → grocery spend.
-      </p>
+      <header className="landing-hero">
+        <div className="landing-hero-copy">
+          <p className="landing-wordmark">MealPlanner</p>
+          <p className="landing-kicker">A calmer way to feed a household</p>
+          <h1>Make a good dinner plan. Keep the rest of the week easy.</h1>
+          <p className="landing-lede">
+            Save the recipes you love, put them on the week, and head to the shop
+            with one list that already knows your pantry.
+          </p>
 
-      <p className="landing-body">
-        Paste a recipe or a link and it&rsquo;s parsed into ingredients and steps. Put
-        the week&rsquo;s dinners on a calendar, and the shopping list writes itself —
-        everything added up, with what&rsquo;s already in the pantry set aside. Tick it
-        off in the store, photograph the receipt on the way out, and watch what the
-        month is costing.
-      </p>
+          <div className="landing-action">
+            {destination === "dashboard" ? (
+              <Link className="cta" href="/dashboard">
+                Go to dashboard
+              </Link>
+            ) : destination === "setup" ? (
+              <Link className="cta" href="/setup">
+                Set up this MealPlanner
+              </Link>
+            ) : (
+              <Link className="cta" href="/login">
+                Sign in
+              </Link>
+            )}
+          </div>
 
-      <p className="landing-cta">
-        {destination === "dashboard" ? (
-          <Link className="cta" href="/dashboard">
-            Go to dashboard
-          </Link>
-        ) : destination === "setup" ? (
-          <Link className="cta" href="/setup">
-            Set up this MealPlanner
-          </Link>
-        ) : (
-          <Link className="cta" href="/login">
-            Sign in
-          </Link>
-        )}
-      </p>
+          {/* Only for the signed-out, and only once the box is past setup: the
+              person who is about to create the first account is not waiting on an
+              invitation from anybody. */}
+          {destination === "login" && (
+            <p className="landing-invitation">
+              New here? Accounts are created by a household invitation.
+            </p>
+          )}
+        </div>
 
-      {/* Only for the signed-out, and only once the box is past setup: the
-          person who is about to create the first account is not waiting on an
-          invitation from anybody. */}
-      {destination === "login" && (
-        <p className="landing-note">
-          There&rsquo;s no sign-up form — accounts come from a household invitation.
-          If your household already uses MealPlanner, ask one of its members to
-          invite you and the link will arrive by mail.
-        </p>
-      )}
+        <div className="landing-preview" aria-hidden="true">
+          <section className="landing-week-card">
+            <div className="landing-preview-heading">
+              <span>This week</span>
+              <span>September</span>
+            </div>
+            <div className="landing-days">
+              <div className="landing-day">
+                <span>Mon</span>
+                <strong>01</strong>
+                <i className="landing-meal landing-meal-tomato">Tomato pasta</i>
+              </div>
+              <div className="landing-day">
+                <span>Tue</span>
+                <strong>02</strong>
+                <i className="landing-meal landing-meal-herb">Green curry</i>
+              </div>
+              <div className="landing-day">
+                <span>Wed</span>
+                <strong>03</strong>
+                <i className="landing-meal landing-meal-berry">Berry galette</i>
+              </div>
+            </div>
+          </section>
+          <section className="landing-list-card">
+            <div className="landing-preview-heading">
+              <span>Shopping list</span>
+              <span className="landing-list-count">8 items</span>
+            </div>
+            <ul>
+              <li><span className="landing-check" />Fresh basil</li>
+              <li><span className="landing-check" />Coconut milk</li>
+              <li><span className="landing-check landing-check-done" />Cherry tomatoes</li>
+              <li><span className="landing-check" />Puff pastry</li>
+            </ul>
+          </section>
+          <div className="landing-preview-sun" />
+        </div>
+      </header>
 
-      <p className="landing-note">
-        No third-party services: recipes are parsed on this server, receipts are
-        read on it, and your kitchen&rsquo;s data stays on the box this is running
-        on.
-      </p>
+      <section className="landing-workflow" aria-labelledby="how-it-works">
+        <div className="landing-section-heading">
+          <p className="landing-kicker">From idea to table</p>
+          <h2 id="how-it-works">The small rituals that make dinner happen.</h2>
+        </div>
+        <ol className="landing-steps">
+          <li>
+            <span className="landing-step-number">01</span>
+            <h3>Plan</h3>
+            <p>Paste a favourite recipe or link, then give every dinner a place in the week.</p>
+          </li>
+          <li>
+            <span className="landing-step-number">02</span>
+            <h3>Shop</h3>
+            <p>Your list adds ingredients together and leaves out what is already in the pantry.</p>
+          </li>
+          <li>
+            <span className="landing-step-number">03</span>
+            <h3>Track</h3>
+            <p>Tick things off at the store, save the receipt, and see where the grocery budget goes.</p>
+          </li>
+        </ol>
+      </section>
+
+      <aside className="landing-privacy" aria-labelledby="privacy-title">
+        <div className="landing-privacy-mark" aria-hidden="true">⌂</div>
+        <div>
+          <p className="landing-kicker">Made for your kitchen</p>
+          <h2 id="privacy-title">Your household&rsquo;s food stays with your household.</h2>
+          <p>
+            MealPlanner is self-hosted. Recipes are parsed here, receipts are read
+            here, and no third-party service gets a copy of your kitchen&rsquo;s data.
+          </p>
+        </div>
+      </aside>
     </div>
   );
 }

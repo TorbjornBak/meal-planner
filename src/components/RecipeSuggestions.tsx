@@ -37,7 +37,8 @@ import {
  *
  * The whole library arrives in one request, the same one the library page
  * makes and the service worker already caches, so shuffling costs nothing and
- * works offline over Tailscale (§10) — the same reasoning as `recipeSearch`.
+ * works when the app is temporarily offline (§10) — the same reasoning as
+ * `recipeSearch`.
  */
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

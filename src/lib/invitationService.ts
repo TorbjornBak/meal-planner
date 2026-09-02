@@ -206,8 +206,8 @@ export async function acceptanceWouldRequireSignIn(opts: {
  * out that name whether or not the link happens to be travelling by email.
  * Without APP_URL we fall back to the origin the inviting request arrived on:
  * it came from a member's browser, and every member reaches the box by the
- * same MagicDNS name on the tailnet (§10). That fallback can read as loopback
- * behind a proxy, but it is only ever shown to a person who can see the host
+ * same public hostname (§10). That fallback can read as loopback behind a
+ * proxy, but it is only ever shown to a person who can see the host
  * is wrong and fix it — never mailed.
  */
 export function invitationUrl(token: string, fallbackOrigin?: string): string {

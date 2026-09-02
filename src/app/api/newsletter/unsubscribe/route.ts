@@ -23,7 +23,7 @@ async function unsubscribe(req: Request): Promise<NextResponse> {
 
   /**
    * Built from APP_URL rather than the request's own origin. HTTPS terminates
-   * at `tailscale serve` and is forwarded to loopback (§10), so the origin
+   * at the public TLS terminator and is forwarded to loopback (§10), so the origin
    * seen here can be http://127.0.0.1:3000 — a redirect to that is a dead link
    * in someone's mail client.
    */

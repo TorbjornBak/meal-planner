@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 
 import { csrfVerdict, expectedOrigin } from "./csrf.ts";
 
-const SELF = "https://box.example.ts.net";
+const SELF = "https://mealplanner.example.com";
 
 function base(overrides = {}) {
   return {
@@ -156,11 +156,11 @@ test("the /api/capture exemption is exact, not a prefix", () => {
 test("expectedOrigin prefers a configured APP_URL over the request's own origin", () => {
   assert.equal(
     expectedOrigin({
-      appUrl: "https://box.example.ts.net/",
+      appUrl: "https://mealplanner.example.com/",
       nodeEnv: "production",
       requestOrigin: "http://127.0.0.1:3000",
     }),
-    "https://box.example.ts.net",
+    "https://mealplanner.example.com",
   );
 });
 
@@ -191,10 +191,10 @@ test("expectedOrigin still prefers a configured APP_URL in development", () => {
   // the dev fallback silently overriding their configuration.
   assert.equal(
     expectedOrigin({
-      appUrl: "https://box.example.ts.net",
+      appUrl: "https://mealplanner.example.com",
       nodeEnv: "development",
       requestOrigin: "http://localhost:3000",
     }),
-    "https://box.example.ts.net",
+    "https://mealplanner.example.com",
   );
 });

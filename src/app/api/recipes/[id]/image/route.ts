@@ -42,7 +42,7 @@ export async function GET(
   // `resolvePublicUrl` by both writers (`imageFromSource` below and
   // `createRecipeFromHtml`), but DNS is not a fact fixed at the moment it was
   // saved — a host that resolved to a public address then can resolve
-  // somewhere this server refuses to fetch (the household's own tailnet, its
+  // somewhere this server refuses to fetch (a private network, its
   // loopback) by the time somebody opens the recipe, same as the redirect
   // hop this module already re-checks in `guardedFetch`. A stale/rebound
   // target is quietly treated as "no image" rather than followed.

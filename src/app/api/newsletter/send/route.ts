@@ -13,7 +13,7 @@ import { clientIp } from "@/lib/rateLimitPolicy";
  * is re-running a particular week, or forcing one out without waiting:
  *
  *   curl -sS -X POST -H "Authorization: Bearer $CRON_SECRET" \
- *     "https://box.example.ts.net/api/newsletter/send?weekStart=2026-08-31"
+ *     "https://mealplanner.example.com/api/newsletter/send?weekStart=2026-08-31"
  *
  * Authenticated with CRON_SECRET rather than a session, so it can be called
  * from a script with no cookie jar. Idempotent per member per week, so a repeat

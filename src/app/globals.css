@@ -888,67 +888,344 @@ table {
 
 /* --- Landing page (§10) ----------------------------------------------------- */
 
-/*
- * The one page with no nav bar above it, so it carries its own top margin —
- * and the one page a stranger might read rather than use, so the measure is
- * narrower than the app's 780px container and the text is centred. Everything
- * here is the app's existing type and colour; a front door that looked like a
- * different product than the thing behind it would be its own kind of lie.
- */
+/* The public front door gets a warmer, editorial treatment while staying in
+   the app's existing palette. Every illustration below is ordinary HTML and
+   CSS, so it still works on a private installation with no asset CDN. */
 .landing {
-  max-width: 32rem;
-  margin: 0 auto;
-  padding: 3rem 0 2rem;
-  text-align: center;
+  --landing-ink: #302821;
+  --landing-paper: #fffdf9;
+  --landing-cream: #f6efe3;
+  --landing-sage: #66715c;
+  --landing-gold: #dba850;
+  --landing-clay: #b5563a;
+  color: var(--landing-ink);
+  padding: clamp(1.25rem, 4vw, 3.5rem) 0 3rem;
 }
 
-.landing-title {
-  margin: 0;
-  font-size: 2.25rem;
-  letter-spacing: -0.02em;
+.landing h1,
+.landing h2,
+.landing h3,
+.landing p {
+  margin-top: 0;
 }
 
-/* The one line that says what this is, so it reads as a subtitle of the name
-   rather than as the first sentence of a paragraph. */
+.landing h1,
+.landing h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+
+.landing-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(17rem, 0.95fr);
+  align-items: center;
+  gap: clamp(2rem, 6vw, 5rem);
+  padding: clamp(1.75rem, 6vw, 4.5rem);
+  border: 1px solid #e7ddcd;
+  border-radius: 1.5rem;
+  background: var(--landing-cream);
+  overflow: hidden;
+}
+
+.landing-wordmark {
+  margin-bottom: clamp(2rem, 5vw, 4rem);
+  color: var(--landing-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+  letter-spacing: -0.04em;
+}
+
+.landing-kicker {
+  margin-bottom: 0.65rem;
+  color: var(--landing-sage);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.landing h1 {
+  max-width: 11ch;
+  margin-bottom: 1rem;
+  font-size: clamp(2.65rem, 6vw, 4.8rem);
+  line-height: 0.98;
+}
+
 .landing-lede {
-  margin: 0.35rem 0 1.75rem;
-  font-size: 1.15rem;
-  color: var(--muted);
+  max-width: 33rem;
+  margin-bottom: 1.5rem;
+  color: #5d554b;
+  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  line-height: 1.6;
 }
 
-.landing-body {
-  margin: 0 0 1.75rem;
-  text-align: left;
+.landing-action {
+  margin-bottom: 0.85rem;
 }
 
-.landing-cta {
-  margin: 0 0 1.75rem;
-}
-
-/*
- * The only filled control in the app, and it can afford to be: this page has
- * exactly one thing to press, and a stranger who has just read four sentences
- * shouldn't have to work out which of the words is the door.
- */
 .cta {
-  display: inline-block;
-  min-height: 44px;
-  padding: 0.6rem 1.4rem;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  background: var(--accent);
-  color: var(--card);
-  font-size: 1.05rem;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0.65rem 1.2rem;
+  border: 1px solid var(--landing-clay);
+  border-radius: 999px;
+  background: var(--landing-clay);
+  box-shadow: 0 5px 0 #8d422d;
+  color: #fffdf9;
+  font-weight: 700;
+  transition: background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 .cta:hover {
+  background: #99452f;
+  box-shadow: 0 3px 0 #793826;
+  color: #fffdf9;
   text-decoration: none;
-  background: color-mix(in srgb, var(--accent) 88%, black);
+  transform: translateY(2px);
+}
+.cta:focus-visible,
+.landing a:focus-visible {
+  outline: 3px solid #1d6d93;
+  outline-offset: 4px;
 }
 
-.landing-note {
-  margin: 0 0 0.9rem;
-  font-size: 0.9rem;
-  color: var(--muted);
-  text-align: left;
+.landing-invitation {
+  margin-bottom: 0;
+  color: #6a6158;
+  font-size: 0.87rem;
+}
+
+.landing-preview {
+  position: relative;
+  display: grid;
+  gap: 0.9rem;
+  min-height: 25rem;
+  padding: 1.1rem;
+  border-radius: 1.1rem;
+  background: #e7d8bd;
+  box-shadow: 1rem 1rem 0 rgba(112, 85, 52, 0.12);
+  transform: rotate(2.25deg);
+}
+
+.landing-week-card,
+.landing-list-card {
+  position: relative;
+  z-index: 1;
+  border: 1px solid #e7ded0;
+  border-radius: 0.75rem;
+  background: var(--landing-paper);
+  box-shadow: 0 0.5rem 1rem rgba(74, 56, 35, 0.09);
+}
+
+.landing-week-card { padding: 1rem; }
+.landing-list-card {
+  width: 78%;
+  margin-left: auto;
+  padding: 0.9rem 1rem;
+  transform: rotate(-4deg);
+}
+
+.landing-preview-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #4e483e;
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+.landing-list-count { color: var(--landing-sage); }
+
+.landing-days {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+}
+.landing-day {
+  min-width: 0;
+  padding: 0.4rem;
+  border-radius: 0.5rem;
+  background: #faf6ef;
+}
+.landing-day > span {
+  display: block;
+  color: #857d73;
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.landing-day strong {
+  display: block;
+  margin: 0.1rem 0 0.45rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.1rem;
+  font-weight: 400;
+}
+.landing-meal {
+  display: block;
+  min-height: 2.8rem;
+  padding: 0.3rem;
+  border-radius: 0.3rem;
+  color: #fffdf9;
+  font-size: 0.58rem;
+  font-style: normal;
+  line-height: 1.15;
+}
+.landing-meal-tomato { background: #bd6b4d; }
+.landing-meal-herb { background: #7c9171; }
+.landing-meal-berry { background: #936675; }
+
+.landing-list-card ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: #4e483e;
+  font-size: 0.72rem;
+}
+.landing-list-card li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.landing-check {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid #a9a095;
+  border-radius: 50%;
+}
+.landing-check-done {
+  border-color: var(--landing-sage);
+  background: var(--landing-sage);
+  box-shadow: inset 0 0 0 2px var(--landing-paper);
+}
+.landing-preview-sun {
+  position: absolute;
+  right: -3.5rem;
+  bottom: -3.5rem;
+  width: 11rem;
+  height: 11rem;
+  border-radius: 50%;
+  background: var(--landing-gold);
+}
+
+.landing-workflow {
+  padding: clamp(4rem, 10vw, 7rem) clamp(0.25rem, 2vw, 1.5rem);
+}
+.landing-section-heading {
+  max-width: 32rem;
+  margin-bottom: 2rem;
+}
+.landing h2 {
+  margin-bottom: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.04;
+}
+.landing-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: steps;
+}
+.landing-steps li {
+  min-height: 15rem;
+  padding: 1.25rem;
+  border-top: 3px solid var(--landing-gold);
+  background: var(--landing-paper);
+}
+.landing-step-number {
+  display: block;
+  margin-bottom: 2.25rem;
+  color: var(--landing-sage);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+}
+.landing-steps h3 {
+  margin-bottom: 0.5rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.45rem;
+  font-weight: 500;
+}
+.landing-steps p {
+  margin-bottom: 0;
+  color: #645c53;
+  font-size: 0.93rem;
+}
+
+.landing-privacy {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+  padding: clamp(1.5rem, 5vw, 3rem);
+  border-radius: 1rem;
+  background: #dce5d4;
+}
+.landing-privacy-mark {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border: 1px solid #97aa8b;
+  border-radius: 50%;
+  color: #43533d;
+  font-size: 1.5rem;
+}
+.landing-privacy h2 {
+  max-width: 20ch;
+  margin-bottom: 0.75rem;
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
+}
+.landing-privacy p:last-child {
+  max-width: 43rem;
+  margin-bottom: 0;
+  color: #52604c;
+}
+
+@media (max-width: 640px) {
+  .landing {
+    padding-top: 0.5rem;
+  }
+  .landing-hero {
+    grid-template-columns: 1fr;
+    padding: 1.5rem;
+    border-radius: 1rem;
+  }
+  .landing-wordmark { margin-bottom: 2.5rem; }
+  .landing h1 { max-width: 10ch; }
+  .landing-preview {
+    min-height: 20rem;
+    margin: 0.25rem 0.35rem 0.5rem 0;
+    transform: rotate(1deg);
+  }
+  .landing-steps { grid-template-columns: 1fr; }
+  .landing-steps li {
+    display: grid;
+    grid-template-columns: 4rem 1fr;
+    column-gap: 0.5rem;
+    min-height: 0;
+    padding: 1.1rem;
+  }
+  .landing-step-number { margin: 0; }
+  .landing-steps h3,
+  .landing-steps p { grid-column: 2; }
+  .landing-steps h3 { margin-bottom: 0.3rem; }
+  .landing-privacy { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cta,
+  .landing-preview,
+  .landing-list-card {
+    transition: none;
+    transform: none;
+  }
+  .cta:hover { transform: none; }
 }

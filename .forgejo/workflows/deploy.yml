@@ -26,7 +26,7 @@ jobs:
       # Docker rejects any tag containing uppercase, and the owner segment of
       # `github.repository` is `TorbjornRegueira`. Fold the whole reference down
       # once, here, rather than at each use.
-      # e.g. git.example.ts.net/torbjornregueira/meal-planner
+      # e.g. registry.example.com/torbjornregueira/meal-planner
       - name: Work out the image name
         run: |
           echo "IMAGE=$(printf '%s/%s' \

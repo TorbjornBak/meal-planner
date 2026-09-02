@@ -36,7 +36,7 @@ function LoginForm() {
         return;
       }
       // Only follow a same-origin path, so a crafted ?next= can't bounce
-      // someone straight off the tailnet to somewhere else. The check lives in
+      // someone off this site to somewhere else. The check lives in
       // safeNextPath because "starts with / but not //" is not enough: a
       // browser reads `/\evil.com` as another origin entirely.
       //

@@ -11,7 +11,8 @@ import { currentHouseholdContext } from "@/lib/currentUser";
 // bookmarklet capture uses, then saves a draft for the mandatory review-and-edit
 // step on the edit page. When a page can't be fetched or carries no recipe
 // (bot wall, JS-only, paywall), it returns a clear message pointing at the
-// bookmarklet, which always works because it's your real browser.
+// hand-pasted recipe text, which does not need the source site to admit this
+// server.
 export async function POST(req: Request) {
   const context = await currentHouseholdContext();
   if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          "Couldn't fetch that page — it may block bots or need a login. Use the bookmarklet instead.",
+          "Couldn't fetch that page — it may block bots or need a login. Copy and paste the recipe text instead.",
       },
       { status: 502 },
     );
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error:
-          "Fetched the page but found no recipe on it. Use the bookmarklet instead.",
+          "Fetched the page but found no recipe on it. Copy and paste the recipe text instead.",
       },
       { status: 422 },
     );
