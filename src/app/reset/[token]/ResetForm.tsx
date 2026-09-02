@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
 /**
  * Choose a new password against a one-time emailed reset link (§9).
@@ -21,6 +23,8 @@ export function ResetForm({
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,19 +34,25 @@ export function ResetForm({
       setError("Those two passwords don't match.");
       return;
     }
+    if (!turnstileToken) {
+      setError("Complete the verification before saving your password.");
+      return;
+    }
 
     setBusy(true);
     try {
       const res = await fetch("/api/password/reset", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ token, password, "cf-turnstile-response": turnstileToken }),
       });
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setError(
-          res.status === 429
+          res.status === 403
+            ? "Verification failed. Try again."
+            : res.status === 429
             ? "Too many attempts. Wait a bit and try again."
             : body.error === "weak-password"
               ? body.message
@@ -57,6 +67,7 @@ export function ResetForm({
       router.push("/dashboard");
       router.refresh();
     } finally {
+      turnstileRef.current?.reset();
       setBusy(false);
     }
   }
@@ -93,8 +104,13 @@ export function ResetForm({
         <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 8 }}>
           At least {minLength} characters.
         </p>
+        <TurnstileWidget
+          ref={turnstileRef}
+          action={TURNSTILE_ACTIONS.passwordReset}
+          onTokenChange={setTurnstileToken}
+        />
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-        <button type="submit" disabled={busy} style={{ marginTop: 12 }}>
+        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
           {busy ? "Saving…" : "Save new password"}
         </button>
       </form>

@@ -7,8 +7,13 @@ import { passwordResetEmail } from "@/lib/emails";
 import { recordAudit } from "@/lib/audit";
 import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
+import { verifyTurnstile } from "@/lib/turnstile";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
-const Input = z.object({ email: z.string().min(1).max(320) });
+const Input = z.object({
+  email: z.string().min(1).max(320),
+  "cf-turnstile-response": z.unknown().optional(),
+});
 
 /**
  * POST /api/password/forgot — email a reset link (§9).
@@ -22,6 +27,16 @@ export async function POST(req: Request) {
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid" }, { status: 400 });
+  }
+
+  if (
+    !(await verifyTurnstile(
+      req,
+      parsed.data["cf-turnstile-response"],
+      TURNSTILE_ACTIONS.passwordForgot,
+    ))
+  ) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const email = normalizeEmail(parsed.data.email);

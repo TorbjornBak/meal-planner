@@ -565,9 +565,10 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Budget targets and over-budget alerts.
 - Per-user data isolation / multi-tenancy. Accounts exist (§9), but everyone in
   the household still shares one plan, one library and one ledger.
-- Third-party sign-in (Google, Apple). It would make an external service a hard
-  dependency for reaching your own kitchen app, against §12. Magic-link sign-in
-  over our own SMTP, or passkeys, are the
+- Third-party sign-in (Google, Apple). Turnstile is deliberately a fail-closed
+  external bot-verification gate on anonymous account entry, but it never owns an
+  identity or session. Outsourcing those to a sign-in provider would be a different
+  dependency. Magic-link sign-in over our own SMTP, or passkeys, are the
   self-contained ways to drop the password; `AuthToken.purpose` already carries a
   `MAGIC_LINK` case so neither needs a migration.
 - Store-aisle grouping of the shopping list.

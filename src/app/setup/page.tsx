@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
 /**
  * First run (§9) — create the household's first account.
@@ -18,6 +20,8 @@ export default function SetupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   useEffect(() => {
     fetch("/api/setup")
@@ -32,18 +36,29 @@ export default function SetupPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!turnstileToken) {
+      setError("Complete the verification before creating the account.");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/setup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, name, password }),
+        body: JSON.stringify({
+          email,
+          name,
+          password,
+          "cf-turnstile-response": turnstileToken,
+        }),
       });
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setError(
-          body.error === "weak-password"
+          res.status === 403
+            ? "Verification failed. Try again."
+            : body.error === "weak-password"
             ? body.message
             : body.error === "invalid-email"
               ? "That doesn't look like an email address."
@@ -57,6 +72,7 @@ export default function SetupPage() {
       router.push("/dashboard");
       router.refresh();
     } finally {
+      turnstileRef.current?.reset();
       setBusy(false);
     }
   }
@@ -104,8 +120,13 @@ export default function SetupPage() {
             style={{ display: "block", width: "100%", padding: "0.5rem", marginTop: 4 }}
           />
         </label>
+        <TurnstileWidget
+          ref={turnstileRef}
+          action={TURNSTILE_ACTIONS.setup}
+          onTokenChange={setTurnstileToken}
+        />
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-        <button type="submit" disabled={busy} style={{ marginTop: 12 }}>
+        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
           {busy ? "Creating…" : "Create account"}
         </button>
       </form>

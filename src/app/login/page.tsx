@@ -1,10 +1,12 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { safeNextPath } from "@/lib/safeRedirect";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
 // Sign in (§9). An account gates entry and, since the multi-household work,
 // also decides what there is to see: the session carries an active household
@@ -16,17 +18,27 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!turnstileToken) {
+      setError("Complete the verification before signing in.");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, "cf-turnstile-response": turnstileToken }),
       });
+      if (res.status === 403) {
+        setError("Verification failed. Try again.");
+        return;
+      }
       if (res.status === 429) {
         setError("Too many attempts. Wait a bit and try again.");
         return;
@@ -47,6 +59,7 @@ function LoginForm() {
       router.push(safeNextPath(params.get("next"), window.location.origin, "/dashboard"));
       router.refresh();
     } finally {
+      turnstileRef.current?.reset();
       setBusy(false);
     }
   }
@@ -78,8 +91,13 @@ function LoginForm() {
             style={{ display: "block", width: "100%", padding: "0.5rem", marginTop: 4 }}
           />
         </label>
+        <TurnstileWidget
+          ref={turnstileRef}
+          action={TURNSTILE_ACTIONS.login}
+          onTokenChange={setTurnstileToken}
+        />
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-        <button type="submit" disabled={busy} style={{ marginTop: 12 }}>
+        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>

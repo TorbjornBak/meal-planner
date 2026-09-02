@@ -280,6 +280,49 @@ function checkCronSecret(env: NodeJS.ProcessEnv, findings: StartupFinding[]): vo
   );
 }
 
+/** Turnstile gates every anonymous way into an account, so missing config is a startup failure. */
+function checkTurnstileConfig(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
+  const secret = env.TURNSTILE_SECRET?.trim() ?? "";
+  if (!secret) {
+    findings.push({
+      variable: "TURNSTILE_SECRET",
+      severity: "fatal",
+      message:
+        "TURNSTILE_SECRET is not set. Every anonymous account-entry form fails closed without it. " +
+        "Store the existing widget secret in the deployment environment before starting.",
+    });
+  }
+
+  const hostnames = (env.TURNSTILE_HOSTNAMES ?? "")
+    .split(",")
+    .map((hostname) => hostname.trim())
+    .filter(Boolean);
+  if (hostnames.length === 0) {
+    findings.push({
+      variable: "TURNSTILE_HOSTNAMES",
+      severity: "fatal",
+      message:
+        "TURNSTILE_HOSTNAMES is not set. Name the frontend hostname Siteverify is allowed to return, " +
+        "for example TURNSTILE_HOSTNAMES=mealplanner.example.com.",
+    });
+    return;
+  }
+
+  const local = hostnames.filter(
+    (hostname) => hostname === "localhost" || hostname === "127.0.0.1",
+  );
+  if (local.length > 0) {
+    findings.push({
+      variable: "TURNSTILE_HOSTNAMES",
+      severity: "fatal",
+      message:
+        `TURNSTILE_HOSTNAMES includes local development hostnames (${local.join(", ")}). ` +
+        "A production deployment must allow only its public frontend hostname; use the local names " +
+        "only in a development .env.",
+    });
+  }
+}
+
 /**
  * Whether the backup configuration is *coherent* — not whether it exists.
  *
@@ -351,6 +394,7 @@ export function findStartupProblems(env: NodeJS.ProcessEnv): StartupFinding[] {
   checkAppUrl(env, findings);
   checkDatabaseUrl(env, findings);
   checkCronSecret(env, findings);
+  checkTurnstileConfig(env, findings);
   checkBorgPassphrase(env, findings);
   return findings;
 }

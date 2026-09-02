@@ -23,6 +23,8 @@ function validEnv(overrides = {}) {
     APP_URL: "https://mealplanner.example.org",
     DATABASE_URL: "postgresql://realuser:realpassword@db:5432/mealplanner?schema=public",
     CRON_SECRET: "b".repeat(32),
+    TURNSTILE_SECRET: "turnstile-test-secret",
+    TURNSTILE_HOSTNAMES: "mealplanner.example.org",
     BORG_REPO: "ssh://u123456@u123456.your-storagebox.de:23/./mealplanner",
     BORG_PASSPHRASE: "c".repeat(32),
     ...overrides,
@@ -184,6 +186,33 @@ test("CRON_SECRET present but short is fatal", () => {
 
 test("CRON_SECRET present, long and not the placeholder has no finding", () => {
   assert.deepEqual(findingsFor("CRON_SECRET", validEnv()), []);
+});
+
+// --- TURNSTILE ------------------------------------------------------------
+
+test("missing Turnstile configuration is fatal before every account-entry route becomes unusable", () => {
+  for (const variable of ["TURNSTILE_SECRET", "TURNSTILE_HOSTNAMES"]) {
+    const findings = findingsFor(variable, validEnv({ [variable]: undefined }));
+    assert.equal(findings.length, 1, variable);
+    assert.equal(findings[0].severity, "fatal");
+    assert.match(findings[0].message, /Turnstile|TURNSTILE/);
+  }
+});
+
+test("production hostname configuration rejects local development hostnames", () => {
+  const findings = findingsFor(
+    "TURNSTILE_HOSTNAMES",
+    validEnv({
+      TURNSTILE_HOSTNAMES: "mealplanner.example.org,localhost,127.0.0.1",
+    }),
+  );
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /localhost|127\.0\.0\.1/);
+});
+
+test("a secret and production-only hostname allowlist have no Turnstile findings", () => {
+  assert.deepEqual(findingsFor("TURNSTILE_SECRET", validEnv()), []);
+  assert.deepEqual(findingsFor("TURNSTILE_HOSTNAMES", validEnv()), []);
 });
 
 // --- BORG_PASSPHRASE -----------------------------------------------------
