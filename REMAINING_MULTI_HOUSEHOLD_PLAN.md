@@ -17,7 +17,7 @@ Phases 1–5:
 - [x] Separate operating the installation from living in a household, and write down every intervention.
 
 The security phase that this instruction waited on is now complete, so
-**Tailscale Funnel or another HTTPS ingress is permitted** — read the exposure
+**public HTTPS ingress is permitted** — read the exposure
 gate at the bottom before turning one on, including the two deployment-time
 checks it does not cover.
 
@@ -121,7 +121,7 @@ Three things turned up that the plan had not anticipated, all now fixed:
   back under that exact `Content-Type` from the app's own origin — so a file
   announcing itself as `text/html` rendered as a document on the app origin. It
   needed an account to plant, which made it near-theoretical on a
-  single-household tailnet box, and stops being theoretical at precisely the
+  single-household private-network box, and stops being theoretical at precisely the
   moment this phase is preparing for. Fixed on both sides in
   `src/lib/receiptPhoto.ts`: an allowlist at upload (excluding `image/svg+xml`,
   which a `startsWith("image/")` test would have admitted), and the stored type
@@ -131,8 +131,8 @@ Three things turned up that the plan had not anticipated, all now fixed:
   hostname *literal*, so `evil.example.com` with an A record of `127.0.0.1`
   passed straight through, and both fetches used `redirect: "follow"`, so an
   allowed URL could 302 to a link-local address. The blocklist also missed
-  `100.64.0.0/10` — which is Tailscale's own range, meaning a pasted recipe URL
-  could probe every other machine on the household's tailnet. Now
+  `100.64.0.0/10` — carrier-grade NAT space often used by private overlays,
+  meaning a pasted recipe URL could probe other machines on that network. Now
       `src/lib/privateNetwork.ts` (pure, exhaustively tested) plus a DNS-resolving
       `guardedFetch` that re-validates every redirect hop, caps the chain at
       five, and pins each socket to the exact public address it validated so a
@@ -379,4 +379,4 @@ should be true of the box on the day it is exposed:
   with real users, configure SMTP: without it, those invitations cannot be
   delivered at all, which is the correct behaviour and an unhelpful one.
 
-Public ingress is allowed only now that Phase 6 passes and HTTPS terminates at a trusted boundary. Tailscale Funnel can be that boundary, but `tailscale serve` alone is tailnet-only and cannot share the app with someone outside the tailnet. Until the gate passes, invite the friend to the tailnet and grant access through Tailscale ACLs/grants to only this service.
+Public ingress is allowed only now that Phase 6 passes and HTTPS terminates at a trusted boundary. A private-only proxy cannot share the app with someone outside that network. Until the gate passes, keep the service private and grant access only to the intended household.

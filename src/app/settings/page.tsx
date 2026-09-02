@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { bookmarkletForOrigin } from "@/lib/bookmarkImport";
+import { runPhotoPass } from "@/lib/photoPass";
 import { AccountCard } from "./AccountCard";
 import { BackupCard } from "./BackupCard";
 import { HouseholdCard } from "./HouseholdCard";
@@ -15,6 +16,7 @@ export default function SettingsPage() {
   const [savedSize, setSavedSize] = useState<number | null>(null);
   const [pantryCount, setPantryCount] = useState<number | null>(null);
   const [bookmarklet, setBookmarklet] = useState("");
+  const [bookmarkletCopyStatus, setBookmarkletCopyStatus] = useState<string | null>(null);
   const bmRef = useRef<HTMLAnchorElement>(null);
   // Recipe library transfer (§2, §11). `importBusy` guards the double-click;
   // the two message slots are kept apart because a failed import and a
@@ -58,6 +60,15 @@ export default function SettingsPage() {
       body: JSON.stringify({ householdSize }),
     }).then((r) => r.json());
     setSavedSize(s.householdSize);
+  }
+
+  async function copyBookmarklet() {
+    try {
+      await navigator.clipboard.writeText(bookmarklet);
+      setBookmarkletCopyStatus("Bookmarklet code copied.");
+    } catch {
+      setBookmarkletCopyStatus("Couldn't copy it automatically. Try dragging the button instead.");
+    }
   }
 
   async function importLibrary(e: React.ChangeEvent<HTMLInputElement>) {
@@ -117,7 +128,20 @@ export default function SettingsPage() {
         ? photoTargets.filter((id): id is string => typeof id === "string")
         : [];
       if (targets.length) {
-        const found = await fetchPhotos(targets);
+        const found = await runPhotoPass(
+          targets,
+          async (id) => {
+            const res = await fetch(`/api/recipes/${id}/image`, {
+              method: "POST",
+              // A non-image body tells this route to use the recipe's source.
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            });
+            return res.ok;
+          },
+          setPhotoPass,
+        );
+        setPhotoPass(null);
         setImportMsg(`${parts.join(" ")} ${describePhotos(found, targets.length)}`);
       }
     } catch {
@@ -128,42 +152,6 @@ export default function SettingsPage() {
       // the obvious thing to do after fixing a rejected file is to re-pick it.
       if (fileRef.current) fileRef.current.value = "";
     }
-  }
-
-  /**
-   * Fetch from the established single-recipe endpoint, which keeps its URL
-   * safety checks and image validation in one place. Three workers keep the
-   * import responsive without treating source sites like a bulk scraper.
-   */
-  async function fetchPhotos(ids: string[]): Promise<number> {
-    const queue = [...ids];
-    let done = 0;
-    let found = 0;
-    setPhotoPass({ done, total: ids.length, found });
-
-    async function worker() {
-      for (;;) {
-        const id = queue.shift();
-        if (!id) return;
-        try {
-          const res = await fetch(`/api/recipes/${id}/image`, {
-            method: "POST",
-            // A non-image body tells this route to use the recipe's source.
-            headers: { "content-type": "application/json" },
-            body: "{}",
-          });
-          if (res.ok) found += 1;
-        } catch {
-          // Continue: a failed source page must not stop the rest of the pass.
-        }
-        done += 1;
-        setPhotoPass({ done, total: ids.length, found });
-      }
-    }
-
-    await Promise.all([worker(), worker(), worker()]);
-    setPhotoPass(null);
-    return found;
   }
 
   const dirty = householdSize !== "" && householdSize !== savedSize;
@@ -215,11 +203,12 @@ export default function SettingsPage() {
           review. No copy-paste needed.
         </p>
         {bookmarklet ? (
-          <p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {/* href set imperatively above (React blocks javascript: hrefs) */}
             <a
               ref={bmRef}
               onClick={(e) => e.preventDefault()}
+              aria-label="Save to MealPlanner bookmarklet. Drag it to the bookmarks bar."
               style={{
                 display: "inline-block",
                 padding: "6px 12px",
@@ -231,13 +220,18 @@ export default function SettingsPage() {
             >
               📎 Save to MealPlanner
             </a>
-          </p>
+            <button type="button" onClick={copyBookmarklet}>
+              Copy bookmarklet code
+            </button>
+          </div>
         ) : (
           <p className="muted">Loading…</p>
         )}
+        {bookmarkletCopyStatus && <p role="status">{bookmarkletCopyStatus}</p>}
         <p className="muted" style={{ fontSize: "0.85em" }}>
           The button points to this MealPlanner address. Drag a fresh copy if the
-          app ever moves to a different domain.
+          app ever moves to a different domain. On a keyboard-only device, copy
+          the code and paste it into a new bookmark&rsquo;s address field.
         </p>
       </div>
 

@@ -895,7 +895,7 @@ table {
   --landing-ink: #302821;
   --landing-paper: #fffdf9;
   --landing-cream: #f6efe3;
-  --landing-sage: #66715c;
+  --landing-sage: #4f6048;
   --landing-gold: #dba850;
   --landing-clay: #b5563a;
   color: var(--landing-ink);
@@ -1052,7 +1052,7 @@ table {
 .landing-day > span {
   display: block;
   color: #857d73;
-  font-size: 0.58rem;
+  font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -1069,13 +1069,13 @@ table {
   padding: 0.3rem;
   border-radius: 0.3rem;
   color: #fffdf9;
-  font-size: 0.58rem;
+  font-size: 0.65rem;
   font-style: normal;
   line-height: 1.15;
 }
-.landing-meal-tomato { background: #bd6b4d; }
-.landing-meal-herb { background: #7c9171; }
-.landing-meal-berry { background: #936675; }
+.landing-meal-tomato { background: #93462f; }
+.landing-meal-herb { background: #53674b; }
+.landing-meal-berry { background: #7f4e60; }
 
 .landing-list-card ul {
   display: grid;

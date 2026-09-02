@@ -43,6 +43,9 @@ services:
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-mealplanner}:${POSTGRES_PASSWORD:-mealplanner}@db:5432/${POSTGRES_DB:-mealplanner}?schema=public"
       AUTH_SECRET: ${AUTH_SECRET}
+      # Cloudflare Turnstile protects every anonymous account-entry form.
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-}
       # Email (§9, §9b) — password resets, invitations, the weekly digest.
       # Optional: with SMTP_HOST unset the app runs, it just can't send mail.
       SMTP_HOST: ${SMTP_HOST:-}
@@ -54,7 +57,7 @@ services:
       # "false" only for a self-signed certificate on a server you control.
       SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
       # Absolute base for links in email — emails are read away from the app,
-      # so there's no request to infer an origin from. Your MagicDNS name (§10).
+      # so there's no request to infer an origin from. Use the public hostname (§10).
       APP_URL: ${APP_URL:-}
       # Required in production: bearer token for operational backup and manual
       # newsletter runs. Replace the public example from .env.example.

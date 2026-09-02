@@ -14,7 +14,7 @@
  * null so the caller can fall back to hand-pasted recipe text.
  */
 
-import { guardedFetch, readCapped } from "./image";
+import { guardedFetch, readCapped } from "./image.ts";
 
 /**
  * Recipe pages are large (400–500 KB seen in the wild); cap generously.

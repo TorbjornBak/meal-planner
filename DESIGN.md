@@ -458,7 +458,7 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Nightly `borg create` of the Postgres dump to a repository over SSH — a Hetzner
   Storage Box is the cheap one — deduplicated, encrypted and incremental, with
   `borg prune` for retention and `borg compact` to actually free what it drops.
-- **Non-optional** — it's the one real weakness of a home box. Everything the
+- **Non-optional** — it's the one real weakness of a single server. Everything the
   household has is in that database, receipt photos included (§7).
 - **The app takes them**, on the timer started from Next's `instrumentation`
   hook (§9b). This began as `scripts/backup.sh` in the host's crontab, which is

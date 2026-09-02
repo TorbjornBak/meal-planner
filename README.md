@@ -230,7 +230,7 @@ where email goes; they don't partition anything.
 ### When email won't send
 
 Both buttons, and a failed invitation, report the actual SMTP error with the
-setting to go and check. The most common cause on a home box is that **the mail
+setting to go and check. The most common cause in this Docker deployment is that **the mail
 server runs on the host while the app runs in a container** — `SMTP_HOST=localhost`
 then means the container itself. Use the host's address, or add
 `host.docker.internal` via `extra_hosts` in `docker-compose.yml`.
@@ -301,7 +301,7 @@ It returns a JSON report naming who it sent to and why it skipped anyone else.
 ## Backups (§11)
 
 Everything the household has is in Postgres — recipes, the plan, the ledger,
-receipt photos and all. A home box is one dead disk away from losing it, so the
+receipt photos and all. A single server is one dead disk away from losing it, so the
 app takes a **Borg** backup every night, on its own schedule, and says on the
 settings screen whether it worked. **There is no crontab to set up.**
 
@@ -408,7 +408,7 @@ Pushing to `main` is the deploy: the workflow builds the image, publishes it
 and restarts the stack. Nothing is deployed by hand.
 
 Forgejo runs on the repository server, but **the runner belongs on the box the
- app runs on** — the deploy job writes to `/srv/mealplanner`, talks to
+app runs on** — the deploy job writes to `/srv/mealplanner`, talks to
 that host's Docker daemon and polls `127.0.0.1:3000`, none of which mean
 anything anywhere else. The runner polls Forgejo outbound, so nothing needs
 inbound access.
