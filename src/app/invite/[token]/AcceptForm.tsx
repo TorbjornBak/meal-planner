@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { InvitationKind } from "@prisma/client";
 import { invitationPath, type AcceptancePlan } from "@/lib/invitations";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
 /**
  * Spend an invitation (§9).
@@ -65,6 +67,8 @@ export function AcceptForm(props: {
   const [signInRequired, setSignInRequired] = useState(false);
   const [busy, setBusy] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -78,6 +82,10 @@ export function AcceptForm(props: {
       setError("Give the household a name.");
       return;
     }
+    if (!turnstileToken) {
+      setError("Complete the verification before accepting the invitation.");
+      return;
+    }
 
     setBusy(true);
     try {
@@ -89,6 +97,7 @@ export function AcceptForm(props: {
           ...(askForPassword ? { password } : {}),
           ...(askForPassword && name.trim() ? { name: name.trim() } : {}),
           ...(askForHouseholdName ? { householdName: newHouseholdName.trim() } : {}),
+          "cf-turnstile-response": turnstileToken,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -96,6 +105,10 @@ export function AcceptForm(props: {
       if (!res.ok) {
         if (res.status === 429) {
           setError("Too many attempts. Wait a bit and try again.");
+          return;
+        }
+        if (res.status === 403) {
+          setError("Verification failed. Try again.");
           return;
         }
         if (body.error === "email-mismatch") {
@@ -128,6 +141,7 @@ export function AcceptForm(props: {
       router.push("/dashboard");
       router.refresh();
     } finally {
+      turnstileRef.current?.reset();
       setBusy(false);
     }
   }
@@ -270,7 +284,13 @@ export function AcceptForm(props: {
 
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
 
-        <button type="submit" disabled={busy} style={{ marginTop: 12 }}>
+        <TurnstileWidget
+          ref={turnstileRef}
+          action={TURNSTILE_ACTIONS.invitationAccept}
+          onTokenChange={setTurnstileToken}
+        />
+
+        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
           {busy ? "Joining…" : buttonLabel({ plan, kind, householdName })}
         </button>
       </form>

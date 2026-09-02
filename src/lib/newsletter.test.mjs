@@ -19,11 +19,11 @@ import {
 const WEEK = new Date(Date.UTC(2026, 7, 24));
 
 const LINKS = {
-  plan: "https://box.ts.net/plan?weekStart=2026-08-24",
-  shopping: "https://box.ts.net/shopping",
-  spending: "https://box.ts.net/spending",
-  unsubscribe: "https://box.ts.net/api/newsletter/unsubscribe?u=abc&t=def",
-  recipe: (id) => `https://box.ts.net/recipes/${id}`,
+  plan: "https://mealplanner.example.com/plan?weekStart=2026-08-24",
+  shopping: "https://mealplanner.example.com/shopping",
+  spending: "https://mealplanner.example.com/spending",
+  unsubscribe: "https://mealplanner.example.com/api/newsletter/unsubscribe?u=abc&t=def",
+  recipe: (id) => `https://mealplanner.example.com/recipes/${id}`,
 };
 
 /**
@@ -324,8 +324,8 @@ test("what was cooked is listed, and links through in the HTML", () => {
     }),
   );
   assert.match(text, /Cooked on 2 nights: Lasagne, Dal\./);
-  assert.ok(html.includes("https://box.ts.net/recipes/r1"));
-  assert.ok(html.includes("https://box.ts.net/recipes/r2"));
+  assert.ok(html.includes("https://mealplanner.example.com/recipes/r1"));
+  assert.ok(html.includes("https://mealplanner.example.com/recipes/r2"));
 });
 
 test("a dish cooked twice says so once instead of appearing twice", () => {

@@ -65,11 +65,14 @@ test("style-src's unsafe-inline is scoped to style-src, not smuggled into script
   assert.doesNotMatch(scriptSrc, /'unsafe-inline'/);
 });
 
-test("img-src, font-src and connect-src are locked to 'self'", () => {
+test("local assets stay self-only while Turnstile gets its required CSP origins", () => {
   const value = csp();
-  for (const directive of ["img-src", "font-src", "connect-src", "worker-src"]) {
+  for (const directive of ["img-src", "font-src", "worker-src"]) {
     assert.match(value, new RegExp(`${directive} 'self'(;|$)`));
   }
+  assert.match(value, /script-src[^;]*https:\/\/challenges\.cloudflare\.com/);
+  assert.match(value, /connect-src 'self' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(value, /frame-src https:\/\/challenges\.cloudflare\.com/);
 });
 
 test("base-uri and form-action don't fall back to default-src's leniency", () => {
@@ -82,18 +85,18 @@ test("base-uri and form-action don't fall back to default-src's leniency", () =>
 
 test("HSTS is guaranteed-safe only under production plus an https APP_URL", () => {
   assert.equal(
-    httpsIsGuaranteed({ nodeEnv: "production", appUrl: "https://box.example.ts.net" }),
+    httpsIsGuaranteed({ nodeEnv: "production", appUrl: "https://mealplanner.example.com" }),
     true,
   );
 });
 
 test("HSTS is withheld outside production even with an https APP_URL", () => {
   assert.equal(
-    httpsIsGuaranteed({ nodeEnv: "development", appUrl: "https://box.example.ts.net" }),
+    httpsIsGuaranteed({ nodeEnv: "development", appUrl: "https://mealplanner.example.com" }),
     false,
   );
   assert.equal(
-    httpsIsGuaranteed({ nodeEnv: undefined, appUrl: "https://box.example.ts.net" }),
+    httpsIsGuaranteed({ nodeEnv: undefined, appUrl: "https://mealplanner.example.com" }),
     false,
   );
 });

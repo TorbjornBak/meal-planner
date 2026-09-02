@@ -56,8 +56,8 @@ export function isMailConfigured(): boolean {
  * The base URL to build links on.
  *
  * Emailed links are read on a phone, away from the app, so they have to be
- * absolute — there's no request to infer an origin from. On the tailnet this
- * is the MagicDNS name, e.g. https://box.tailnet-name.ts.net (§10).
+ * absolute — there's no request to infer an origin from. Use the public HTTPS
+ * hostname configured for the deployment (§10).
  */
 export function appUrl(path = "/"): string {
   const base = (process.env.APP_URL ?? "").replace(/\/+$/, "");

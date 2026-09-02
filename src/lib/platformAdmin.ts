@@ -39,9 +39,9 @@ export type AccessDecision = "allow" | "unauthorized" | "forbidden";
  * possibly help.
  *
  * Until now every one of these endpoints accepted any signed-in account. On a
- * single-household box behind Tailscale that was nearly true; the moment a
- * second household exists, "anybody with a login" includes people from a
- * different kitchen entirely, and the backup passphrase is not theirs to read.
+ * single-household installation that was nearly true; the moment a second
+ * household exists, "anybody with a login" includes people from a different
+ * kitchen entirely, and the backup passphrase is not theirs to read.
  */
 export function operationalAccess(caller: Caller): AccessDecision {
   if (caller.bearer) return "allow";

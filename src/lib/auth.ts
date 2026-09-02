@@ -112,8 +112,8 @@ export function sessionCookieOptions(maxAgeSeconds: number) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    // Served over HTTPS by `tailscale serve` (§10). Relaxed on plain-HTTP
-    // localhost so `npm run dev` can hold a session.
+    // Served over HTTPS by the deployment's TLS terminator (§10). Relaxed on
+    // plain-HTTP localhost so `npm run dev` can hold a session.
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: maxAgeSeconds,

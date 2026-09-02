@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
 // "Forgot password" (§9) — ask for a reset link by email.
 export default function ForgotPage() {
@@ -9,17 +11,27 @@ export default function ForgotPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!turnstileToken) {
+      setError("Complete the verification before requesting a link.");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/password/forgot", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, "cf-turnstile-response": turnstileToken }),
       });
+      if (res.status === 403) {
+        setError("Verification failed. Try again.");
+        return;
+      }
       if (res.status === 429) {
         setError("Too many requests. Wait a bit before trying again.");
         return;
@@ -34,6 +46,7 @@ export default function ForgotPage() {
       }
       setSent(true);
     } finally {
+      turnstileRef.current?.reset();
       setBusy(false);
     }
   }
@@ -71,8 +84,13 @@ export default function ForgotPage() {
                 style={{ display: "block", width: "100%", padding: "0.5rem", marginTop: 4 }}
               />
             </label>
+            <TurnstileWidget
+              ref={turnstileRef}
+              action={TURNSTILE_ACTIONS.passwordForgot}
+              onTokenChange={setTurnstileToken}
+            />
             {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-            <button type="submit" disabled={busy} style={{ marginTop: 12 }}>
+            <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
               {busy ? "Sending…" : "Email me a link"}
             </button>
           </form>

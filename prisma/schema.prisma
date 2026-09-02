@@ -117,7 +117,7 @@ model Recipe {
   /// Kept for provenance and as a fallback when we hold no bytes of our own.
   imageUrl            String?
   /// The recipe photo itself, stored in the database like receipt photos (§7)
-  /// so the app stays self-contained and works offline over Tailscale.
+  /// so the app stays self-contained and works when temporarily offline.
   image               Bytes?
   imageMime           String?
   isFavorite          Boolean          @default(false)

@@ -144,7 +144,7 @@ export function BackupCard() {
           ? status.schedulerEnabled
             ? `Every night at ${status.schedule.description}, to ${status.repo.host ?? status.repo.display}. Keeping ${status.retention.daily} daily, ${status.retention.weekly} weekly and ${status.retention.monthly} monthly archives.`
             : "The nightly schedule is switched off (BACKUP_SCHEDULER=off). Backups only happen when someone presses the button."
-          : "The database holds everything: your recipes, the plan, the shopping list, every receipt photo. A home box is one failed disk away from losing all of it."}
+          : "The database holds everything: your recipes, the plan, the shopping list, every receipt photo. A single server is one failed disk away from losing all of it."}
       </p>
 
       {status.tools.borg === null && (

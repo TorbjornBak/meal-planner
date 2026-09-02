@@ -84,6 +84,7 @@ export function buildCsp(input: CspInput): string {
     "'self'",
     `'nonce-${input.nonce}'`,
     "'strict-dynamic'",
+    "https://challenges.cloudflare.com",
     input.allowEval ? "'unsafe-eval'" : null,
   ]
     .filter((part): part is string => part !== null)
@@ -95,7 +96,8 @@ export function buildCsp(input: CspInput): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self'",
     "font-src 'self'",
-    "connect-src 'self'",
+    "connect-src 'self' https://challenges.cloudflare.com",
+    "frame-src https://challenges.cloudflare.com",
     "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
@@ -178,8 +180,7 @@ export function securityHeaders(input: SecurityHeadersInput): [string, string][]
 
   if (input.httpsGuaranteed) {
     // Six months, not the two years a preload-list submission wants — this
-    // box was never going into that list (§10: a tailnet name, not a public
-    // domain meant to be pinned in every browser on earth), so there is no
+    // the deployment does not need preload-list duration (§10), so there is no
     // reason to pick the longer, harder-to-walk-back number.
     headers.push(["Strict-Transport-Security", "max-age=15552000; includeSubDomains"]);
   }

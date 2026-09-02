@@ -5,7 +5,7 @@
  * that runs inside the Node process, and the Danish language model is vendored
  * in `tessdata/` and handed to the worker as bytes. Nothing is fetched at
  * runtime and there is no key to hold, which is the whole point — the app keeps
- * working on a home box behind Tailscale with no route to the outside world.
+ * working without any runtime network dependency.
  *
  * The transcript this produces is sloppy by nature. Turning it into a number is
  * `receiptTotal.ts`'s job, and the number is a suggestion the human confirms.

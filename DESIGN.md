@@ -19,9 +19,9 @@ list → tick it off in the store → log what you paid → watch weekly spend.
     for you. Best-effort: it works for most sites that publish schema.org recipe
     data, which is the majority, but a site can refuse (bot walls, login, JS-only
     rendering). See §2b for the guarded fetch.
-  - **Bookmarklet** — captures the page HTML from your own browser (where you're
-    a logged-in, non-bot reader) and sends it in. Always works, because it's your
-    real browser; it's the fallback when a URL fetch is blocked.
+  - **Bookmarklet** — hands the current page URL to MealPlanner's URL import
+    screen. This avoids cross-origin requests from the recipe site and saves
+    copy-paste, while keeping the same guarded server-side fetch as the fast path.
   - **Paste text** — copy the recipe text from anywhere and paste it.
 - **A review-and-edit step is mandatory.** However a recipe came in, you eyeball
   and correct the parsed ingredients before they count toward anything. Bad parse
@@ -76,21 +76,21 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 - A recipe can carry **one photo**, shown on the cooking view, in the library
   list, and on its night in the calendar.
-- **Captured recipes bring their own.** The page you captured already declares
-  its photo (schema.org `image`, `og:image`, `twitter:image`); we read that URL
-  out of the captured HTML and **download the image once**. Best-effort — a
-  missing or unreachable photo never fails a capture.
+- **Imported recipes bring their own.** The fetched page declares its photo
+  (schema.org `image`, `og:image`, `twitter:image`); we read that URL out of the
+  HTML and **download the image once**. Best-effort — a missing or unreachable
+  photo never fails an import.
 - **Or add one yourself** from the edit page: upload from the device, or ask us
   to fetch the source page's photo for a recipe that predates this.
 - Stored **as bytes in the database**, like receipt photos (§7) — not
-  hotlinked. The app has to work offline over Tailscale (§10), and a hotlinked
+  hotlinked. The app has to work when temporarily offline (§10), and a hotlinked
   photo dies the day the source site reorganizes. Capped at 5 MB.
 - The server reaches out to the open web in a few **guarded** spots: downloading
   a recipe photo by URL, fetching the recipe *page* for the paste-a-URL import
   (§1), and the "fetch from source" photo button for older recipes. All of them
   go through the same private-network guard (`resolvePublicUrl`), so neither a
   pasted URL nor a page-declared image URL can be used to probe the host's own
-  network. The bookmarklet path still sends content straight from your browser.
+  network. The bookmarklet enters through this same guarded URL path.
 
 ## 2c. Kinds — sections in the library
 
@@ -266,8 +266,10 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   out — or removing a member — takes effect on the very next request instead of
   whenever a cookie happens to lapse. The cookie holds a random token; only its
   hash is stored, so a database dump doesn't hand over live sessions.
-- **The bookmarklet's capture token is the one credential that isn't a session**
-  — the capture request is cross-origin and arrives without a cookie, so it
+- **Legacy bookmarklets used a capture token that isn't a session.** Newly
+  generated bookmarklets navigate to the signed-in URL-import page instead,
+  but `/api/capture` remains temporarily for already-installed bookmarklets.
+  Its cross-origin request arrives without a cookie, so it
   carries a token derived per household instead. That token used to be a pure
   function of `AUTH_SECRET` and the household id, which made it unrevocable:
   somebody removed from a household kept a working write credential for it for
@@ -276,7 +278,7 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   derivation and **rotated whenever anybody loses access**, in the same
   transaction that deletes the membership. Rotation invalidates the bookmarklet
   for everyone still in the household, which is the right trade: a shared
-  credential cannot be revoked for one holder, and a stale bookmarklet is an
+  credential cannot be revoked for one holder, and a stale legacy bookmarklet is an
   annoyance where a live one held by somebody who was removed is not.
 - **Getting in when you can't:**
   - **Forgot password** emails a single-use link, good for one hour. Requesting
@@ -330,7 +332,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   - **Admins are equals**: a household admin may remove a member, but not
     remove or demote another admin. Two people who share a kitchen and have
     fallen out should end up talking, not racing to click first.
-- Tailscale (§10) is still the primary gate; accounts are the second factor.
+- The HTTPS reverse proxy is the network boundary; accounts are the second
+  factor.
 
 ## 9b. Weekly newsletter
 
@@ -439,20 +442,23 @@ list → tick it off in the store → log what you paid → watch weekly spend.
   down in `platformRoleChangeRefusal` and tested, so the day a button appears
   it starts out right, but no button exists today.
 
-## 10. Hosting — home box via Tailscale (now)
+## 10. Hosting — public server via Cloudflare and Caddy (now)
 
-- Runs on a home box, reachable over a private Tailscale tailnet from anywhere
-  (including the store) — no port-forwarding, no dynamic DNS, no public exposure.
-- HTTPS via `tailscale serve` on the MagicDNS `*.ts.net` name — no reverse proxy, no cert management.
-- Each household member installs Tailscale once and joins the tailnet.
-- **Possible VPS migration later** — kept cheap by building Dockerized from day one.
+- Runs on a public server (for example, a Hetzner VPS) with Docker Compose.
+- Cloudflare provides DNS and optional edge protections; Caddy on the server
+  terminates HTTPS and proxies the public hostname to the app's loopback port.
+- Postgres and the app's direct port remain bound to loopback. Only Caddy's
+  HTTPS listener is exposed publicly, and its forwarded host is the trusted
+  boundary used by the app's origin and rate-limit checks.
+- The deployment is portable: moving to another server changes the host and
+  DNS records, not the application architecture.
 
 ## 11. Backups — Borg, taken by the app
 
 - Nightly `borg create` of the Postgres dump to a repository over SSH — a Hetzner
   Storage Box is the cheap one — deduplicated, encrypted and incremental, with
   `borg prune` for retention and `borg compact` to actually free what it drops.
-- **Non-optional** — it's the one real weakness of a home box. Everything the
+- **Non-optional** — it's the one real weakness of a single server. Everything the
   household has is in that database, receipt photos included (§7).
 - **The app takes them**, on the timer started from Next's `instrumentation`
   hook (§9b). This began as `scripts/backup.sh` in the host's crontab, which is
@@ -495,7 +501,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 - **Next.js (TypeScript, React)** full-stack.
 - **Postgres + Prisma.**
-- **Docker Compose:** app + Postgres. HTTPS via `tailscale serve` on the host.
+- **Docker Compose:** app + Postgres. HTTPS via Caddy on the host, with the
+  public hostname managed through Cloudflare.
 - Recipe parsing is a **deterministic, in-process string parser** — no external
   services, no LLM, no API keys.
 - Receipt OCR is **Tesseract in-process** (WebAssembly, vendored language
@@ -547,8 +554,8 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 
 - Bulk or automated crawling of source sites — no crawler, no background jobs,
   no re-fetching on a schedule. Single-page import of a URL *you* paste is
-  supported (§1); it's a best-effort fetch of one page you chose, with the
-  bookmarklet as the fallback when a site blocks it. The app's two timers are the
+  supported (§1); it's a best-effort fetch of one page you chose, with pasted
+  recipe text as the fallback when a site blocks it. The app's two timers are the
   exceptions, and narrow ones: the weekly digest (§9b) fetches nothing and calls
   nobody, it only asks the database whether this week's mail is owed, and the
   nightly backup (§11) talks only to a storage box the household chose and paid
@@ -558,10 +565,10 @@ list → tick it off in the store → log what you paid → watch weekly spend.
 - Budget targets and over-budget alerts.
 - Per-user data isolation / multi-tenancy. Accounts exist (§9), but everyone in
   the household still shares one plan, one library and one ledger.
-- Third-party sign-in (Google, Apple). It would make an external service a hard
-  dependency for reaching your own kitchen app, against §12 — and the tailnet's
-  `*.ts.net` name (§10) can't satisfy either provider's domain-verification
-  requirement anyway. Magic-link sign-in over our own SMTP, or passkeys, are the
+- Third-party sign-in (Google, Apple). Turnstile is deliberately a fail-closed
+  external bot-verification gate on anonymous account entry, but it never owns an
+  identity or session. Outsourcing those to a sign-in provider would be a different
+  dependency. Magic-link sign-in over our own SMTP, or passkeys, are the
   self-contained ways to drop the password; `AuthToken.purpose` already carries a
   `MAGIC_LINK` case so neither needs a migration.
 - Store-aisle grouping of the shopping list.

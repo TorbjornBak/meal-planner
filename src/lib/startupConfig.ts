@@ -72,7 +72,7 @@ const PLACEHOLDER_SECRET = "change-me-to-a-long-random-string";
  */
 const EXAMPLE_DB_USER = "mealplanner";
 const EXAMPLE_DB_PASSWORD = "mealplanner";
-const EXAMPLE_APP_URL = "https://box.your-tailnet.ts.net";
+const EXAMPLE_APP_URL = "https://mealplanner.example.com";
 
 /**
  * Below this, a secret is either a short human-chosen string or a leftover
@@ -142,7 +142,7 @@ function checkAppUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
         "APP_URL is not set. Every emailed link (password reset, invitation, weekly digest, unsubscribe) " +
         "needs an absolute URL to point at, since mail is read away from any request this app could infer " +
         "an origin from (§9b). Set it to this box's externally reachable https URL, e.g. " +
-        'APP_URL="https://box.your-tailnet.ts.net" (§10).',
+        'APP_URL="https://mealplanner.example.com".',
     });
     return;
   }
@@ -154,7 +154,7 @@ function checkAppUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
     findings.push({
       variable: "APP_URL",
       severity: "fatal",
-      message: `APP_URL="${raw}" does not parse as a URL. It needs a scheme and a host, e.g. https://box.your-tailnet.ts.net.`,
+      message: `APP_URL="${raw}" does not parse as a URL. It needs a scheme and a host, e.g. https://mealplanner.example.com.`,
     });
     return;
   }
@@ -175,7 +175,7 @@ function checkAppUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
       message:
         `APP_URL="${raw}" is not https. Emailed links (password reset, invitations, unsubscribe) would ` +
         "carry their one-time tokens in plain text, and the security headers only send HSTS when this is " +
-        'https. Use the https MagicDNS name, e.g. APP_URL="https://box.your-tailnet.ts.net" (§10), or the ' +
+        'https. Use the public https hostname, e.g. APP_URL="https://mealplanner.example.com", or the ' +
       "https name of whatever terminates TLS in front of this box.",
     });
     return;
@@ -219,8 +219,8 @@ function checkDatabaseUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): v
 
   // Decision: fatal, not a warning. docker-compose.yml defaults POSTGRES_USER
   // and POSTGRES_PASSWORD to "mealplanner" so a first `docker compose up`
-  // works with no setup — right for a box that only ever spoke to itself over
-  // Tailscale, wrong the moment Phase 6's exposure gate opens this to the
+  // works with no setup — useful for local development, but wrong once the
+  // application is exposed to the
   // public internet: default credentials on the database holding every
   // recipe, plan and receipt photo in the household are a published fact,
   // not a secret. The alternative — a warning — would let an installation
@@ -247,7 +247,7 @@ function checkDatabaseUrl(env: NodeJS.ProcessEnv, findings: StartupFinding[]): v
         `DATABASE_URL is still using the example "${EXAMPLE_DB_USER}"/"${EXAMPLE_DB_PASSWORD}" credentials ` +
         "from .env.example and docker-compose.yml's defaults. Set POSTGRES_USER and POSTGRES_PASSWORD (and, " +
         "if you assemble DATABASE_URL yourself rather than letting compose do it, DATABASE_URL to match) to " +
-        "a real password before this box is reachable from anywhere but your own tailnet.",
+        "a real password before this box is reachable from the public internet.",
     });
   }
 }
@@ -278,6 +278,49 @@ function checkCronSecret(env: NodeJS.ProcessEnv, findings: StartupFinding[]): vo
       `CRON_SECRET is only ${length} characters, short enough to be worth guessing outright. Replace it ` +
       "with `openssl rand -base64 32`, or unset it entirely to close the endpoints it guards (§9c).",
   );
+}
+
+/** Turnstile gates every anonymous way into an account, so missing config is a startup failure. */
+function checkTurnstileConfig(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
+  const secret = env.TURNSTILE_SECRET?.trim() ?? "";
+  if (!secret) {
+    findings.push({
+      variable: "TURNSTILE_SECRET",
+      severity: "fatal",
+      message:
+        "TURNSTILE_SECRET is not set. Every anonymous account-entry form fails closed without it. " +
+        "Store the existing widget secret in the deployment environment before starting.",
+    });
+  }
+
+  const hostnames = (env.TURNSTILE_HOSTNAMES ?? "")
+    .split(",")
+    .map((hostname) => hostname.trim())
+    .filter(Boolean);
+  if (hostnames.length === 0) {
+    findings.push({
+      variable: "TURNSTILE_HOSTNAMES",
+      severity: "fatal",
+      message:
+        "TURNSTILE_HOSTNAMES is not set. Name the frontend hostname Siteverify is allowed to return, " +
+        "for example TURNSTILE_HOSTNAMES=mealplanner.example.com.",
+    });
+    return;
+  }
+
+  const local = hostnames.filter(
+    (hostname) => hostname === "localhost" || hostname === "127.0.0.1",
+  );
+  if (local.length > 0) {
+    findings.push({
+      variable: "TURNSTILE_HOSTNAMES",
+      severity: "fatal",
+      message:
+        `TURNSTILE_HOSTNAMES includes local development hostnames (${local.join(", ")}). ` +
+        "A production deployment must allow only its public frontend hostname; use the local names " +
+        "only in a development .env.",
+    });
+  }
 }
 
 /**
@@ -351,6 +394,7 @@ export function findStartupProblems(env: NodeJS.ProcessEnv): StartupFinding[] {
   checkAppUrl(env, findings);
   checkDatabaseUrl(env, findings);
   checkCronSecret(env, findings);
+  checkTurnstileConfig(env, findings);
   checkBorgPassphrase(env, findings);
   return findings;
 }

@@ -47,7 +47,7 @@ const IPV4_BOUNDARIES = [
   { name: "private-use 172.16/12 low", blocked: "172.16.0.0", allowed: "172.15.255.255" },
   { name: "private-use 172.16/12 high", blocked: "172.31.255.255", allowed: "172.32.0.0" },
   { name: "private-use 192.168/16", blocked: "192.168.255.255", allowed: "192.169.0.0" },
-  { name: "carrier-grade NAT low (Tailscale, §10)", blocked: "100.64.0.0", allowed: "100.63.255.255" },
+  { name: "carrier-grade NAT low (§10)", blocked: "100.64.0.0", allowed: "100.63.255.255" },
   { name: "carrier-grade NAT high", blocked: "100.127.255.255", allowed: "100.128.0.0" },
   { name: "link-local 169.254/16 low", blocked: "169.254.0.0", allowed: "169.253.255.255" },
   { name: "link-local 169.254/16 high", blocked: "169.254.255.255", allowed: "169.255.0.0" },

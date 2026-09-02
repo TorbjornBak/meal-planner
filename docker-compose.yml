@@ -1,14 +1,9 @@
 # MealPlanner — app + Postgres (§10, §12).
 #
-# HTTPS is handled by `tailscale serve` on the host, not by a reverse proxy in
-# Compose. The app publishes port 3000 to the host loopback; tailscaled (running
-# on the host, joined to the tailnet) serves it over HTTPS on the MagicDNS
-# *.ts.net name:
-#
-#   tailscale serve --bg 3000
-#
-# That exposes the app on the tailnet only — no public exposure, no
-# port-forwarding, no cert management (§10).
+# HTTPS is handled by Caddy on the host, not by Compose. Cloudflare points the
+# public hostname at that host, and Caddy terminates HTTPS before forwarding to
+# the app's loopback port. Postgres remains available only to the app and local
+# administration (§10).
 
 # Pinned so the named volume below is always `mealplanner_pgdata`, no matter
 # which directory compose is invoked from (dev checkout vs. /srv/mealplanner).
@@ -24,7 +19,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-mealplanner}
     ports:
       # Loopback-only, so `npm run dev` on the host can reach it without
-      # exposing Postgres to the tailnet. The app container talks to `db`
+      # exposing Postgres to the network. The app container talks to `db`
       # over the compose network regardless.
       - "127.0.0.1:5432:5432"
     volumes:
@@ -48,6 +43,9 @@ services:
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-mealplanner}:${POSTGRES_PASSWORD:-mealplanner}@db:5432/${POSTGRES_DB:-mealplanner}?schema=public"
       AUTH_SECRET: ${AUTH_SECRET}
+      # Cloudflare Turnstile protects every anonymous account-entry form.
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-}
       # Email (§9, §9b) — password resets, invitations, the weekly digest.
       # Optional: with SMTP_HOST unset the app runs, it just can't send mail.
       SMTP_HOST: ${SMTP_HOST:-}
@@ -59,7 +57,7 @@ services:
       # "false" only for a self-signed certificate on a server you control.
       SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
       # Absolute base for links in email — emails are read away from the app,
-      # so there's no request to infer an origin from. Your MagicDNS name (§10).
+      # so there's no request to infer an origin from. Use the public hostname (§10).
       APP_URL: ${APP_URL:-}
       # Required in production: bearer token for operational backup and manual
       # newsletter runs. Replace the public example from .env.example.
@@ -105,8 +103,8 @@ services:
       # by re-reading the whole repository.
       - backupstate:/var/lib/mealplanner
     ports:
-      # Loopback-only; `tailscale serve` on the host proxies this to the tailnet
-      # over HTTPS. Not reachable from the LAN.
+      # Loopback-only; Caddy on the host proxies this over HTTPS. Not directly
+      # reachable from the LAN or public network.
       - "127.0.0.1:3000:3000"
 
 volumes:

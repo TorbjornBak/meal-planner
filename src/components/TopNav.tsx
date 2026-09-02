@@ -12,8 +12,8 @@ import { HouseholdSwitcher } from "@/components/HouseholdSwitcher";
  *
  * Every link in here goes somewhere that requires a session, so on a public
  * page the whole strip is a row of links that bounce you back to where you
- * already are. That was merely untidy while the only way in was a tailnet;
- * on the public internet the landing page is the first thing a stranger sees,
+ * already are. On the public internet the landing page is the first thing a
+ * stranger sees,
  * and a nav bar full of Plan/Recipes/Shopping tells them this app is theirs to
  * poke at when none of it is.
  *

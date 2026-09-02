@@ -492,7 +492,7 @@ function PlanCalendar() {
 
   // Filtered here in the browser: every recipe's ingredients arrived with the
   // library, so searching costs no request per keystroke and keeps working
-  // offline over Tailscale (§10).
+  // offline when the app is temporarily unreachable (§10).
   const results = useMemo(() => searchRecipes(recipes, query), [recipes, query]);
 
   function openPicker(dayOfWeek: number) {

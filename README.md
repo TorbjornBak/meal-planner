@@ -12,15 +12,14 @@ spend.
 
 - **Next.js** (App Router, TypeScript, React) — full-stack.
 - **Postgres + Prisma.**
-- **Docker Compose**: app + Postgres, served over **Tailscale** via `tailscale serve`.
+- **Docker Compose**: app + Postgres, served publicly through Cloudflare and Caddy.
 
-No third-party APIs or keys: recipe parsing is a deterministic string parser
-(§1), not an LLM, and receipt OCR is Tesseract compiled to WebAssembly, running
-in-process against a language model vendored in `tessdata/` (§7) — a library, not
-a service. The server does fetch directly from a recipe's *own* source site — the
-page, when you import by pasting a URL, and its photo — but that's a best-effort,
-user-initiated fetch guarded against private-network addresses, not a service you
-sign up for.
+Cloudflare Turnstile is the app's one third-party API: every anonymous account-entry
+form fails closed through it before the existing handler runs. Recipe parsing is
+still a deterministic string parser (§1), not an LLM, and receipt OCR is Tesseract
+compiled to WebAssembly, running in-process against a language model vendored in
+`tessdata/` (§7) — a library, not a service. The server also fetches directly from a
+recipe's own source site when asked, guarded against private-network addresses.
 
 ## Project layout
 
@@ -102,7 +101,7 @@ tessdata/                Vendored Tesseract language model for receipt OCR (§7)
 `npm test` runs the unit tests (Node's built-in runner, no framework — it reads
 the TypeScript directly).
 
-## Production (home box via Tailscale)
+## Production (public deployment via Cloudflare and Caddy)
 
 - Deploys are automatic: push to `main` and Forgejo Actions builds, publishes
   and restarts the stack (see [CI/CD](#cicd-forgejo-actions)). The commands
@@ -110,8 +109,17 @@ the TypeScript directly).
   hand when CI is not an option.
 - `docker compose up -d --build` brings up app + Postgres from this checkout.
   The app listens on `127.0.0.1:3000`.
-- Expose it over HTTPS on the tailnet with `tailscale serve --bg 3000`
-  (tailscaled runs on the host). No reverse proxy or cert management (§10).
+- Put Caddy in front of the app and configure it for your public hostname. Point
+  the hostname at the server through Cloudflare, and let Caddy terminate HTTPS
+  (or use Cloudflare's origin certificate). Keep the app and Postgres ports
+  bound to loopback; only Caddy needs to accept public traffic (§10).
+  A minimal Caddyfile looks like this:
+
+  ```caddy
+  mealplanner.example.com {
+      reverse_proxy 127.0.0.1:3000
+  }
+  ```
 - Migrations run automatically on container start (`prisma migrate deploy`).
 - Set up backups from Settings → Backups (§11). There is no crontab: the app
   takes them itself and tells you whether they worked.
@@ -132,6 +140,8 @@ build` are all unaffected — see below.
 | `APP_URL` | Fatal | Fatal | Fatal if it doesn't parse as a URL, or isn't `https://` |
 | `DATABASE_URL` | Fatal, including blank credentials | Fatal if either credential is still `mealplanner` | Fatal if it doesn't parse |
 | `CRON_SECRET` | Fatal | Fatal | Fatal (< 20 characters) |
+| `TURNSTILE_SECRET` | Fatal | — | — |
+| `TURNSTILE_HOSTNAMES` | Fatal | — | Fatal if production includes `localhost` or `127.0.0.1` |
 | `BORG_REPO` | — (backups simply off) | — | — |
 | `BORG_PASSPHRASE` | Fatal **only if `BORG_REPO` is set** | Fatal if `BORG_REPO` is set | Fatal (< 20 characters) if `BORG_REPO` is set |
 
@@ -151,8 +161,8 @@ A few of these are worth spelling out:
 - **Default database credentials are treated as fatal, not a warning.**
   `docker-compose.yml` defaults `POSTGRES_USER`/`POSTGRES_PASSWORD` to
   `mealplanner`/`mealplanner` so a first `docker compose up` needs no setup —
-  fine for a box that only ever spoke to itself over Tailscale, wrong the
-  moment the Phase 6 exposure gate opens this to the public internet, since
+  fine for local development, wrong once the Phase 6 exposure gate opens this
+  to the public internet, since
   the credentials guarding every recipe, plan and receipt photo in the
   household would then be a published fact rather than a secret. The
   alternative (a warning) would let a deployment stay on them forever, since
@@ -191,7 +201,7 @@ AUTH_SECRET="...".
 credentials from .env.example and docker-compose.yml's defaults. Set POSTGRES_USER and
 POSTGRES_PASSWORD (and, if you assemble DATABASE_URL yourself rather than letting compose do it,
 DATABASE_URL to match) to a real password before this box is reachable from anywhere but your own
-tailnet.
+public internet.
 [startup] refusing to start: 2 problem(s) above must be fixed first (AUTH_SECRET, DATABASE_URL).
 ```
 
@@ -221,7 +231,7 @@ where email goes; they don't partition anything.
 ### When email won't send
 
 Both buttons, and a failed invitation, report the actual SMTP error with the
-setting to go and check. The most common cause on a home box is that **the mail
+setting to go and check. The most common cause in this Docker deployment is that **the mail
 server runs on the host while the app runs in a container** — `SMTP_HOST=localhost`
 then means the container itself. Use the host's address, or add
 `host.docker.internal` via `extra_hosts` in `docker-compose.yml`.
@@ -284,7 +294,7 @@ with `CRON_SECRET`. Pass `?weekStart=YYYY-MM-DD` to re-run a specific week:
 
 ```sh
 curl -sS -X POST -H "Authorization: Bearer <your CRON_SECRET>" \
-  https://box.your-tailnet.ts.net/api/newsletter/send
+  https://mealplanner.example.com/api/newsletter/send
 ```
 
 It returns a JSON report naming who it sent to and why it skipped anyone else.
@@ -292,7 +302,7 @@ It returns a JSON report naming who it sent to and why it skipped anyone else.
 ## Backups (§11)
 
 Everything the household has is in Postgres — recipes, the plan, the ledger,
-receipt photos and all. A home box is one dead disk away from losing it, so the
+receipt photos and all. A single server is one dead disk away from losing it, so the
 app takes a **Borg** backup every night, on its own schedule, and says on the
 settings screen whether it worked. **There is no crontab to set up.**
 
@@ -356,7 +366,7 @@ session, for anyone who'd rather drive it from the host:
 
 ```sh
 curl -sS -X POST -H "Authorization: Bearer <your CRON_SECRET>" \
-  https://box.your-tailnet.ts.net/api/backup/run
+  https://mealplanner.example.com/api/backup/run
 ```
 
 ### Restoring
@@ -398,8 +408,8 @@ The common ones:
 Pushing to `main` is the deploy: the workflow builds the image, publishes it
 and restarts the stack. Nothing is deployed by hand.
 
-Forgejo itself runs on the `git` tailnet node, but **the runner belongs on the
-box the app runs on** — the deploy job writes to `/srv/mealplanner`, talks to
+Forgejo runs on the repository server, but **the runner belongs on the box the
+app runs on** — the deploy job writes to `/srv/mealplanner`, talks to
 that host's Docker daemon and polls `127.0.0.1:3000`, none of which mean
 anything anywhere else. The runner polls Forgejo outbound, so nothing needs
 inbound access.
@@ -435,7 +445,7 @@ inbound access.
    only `docker-compose.yml` is synced.
 3. **Registry access.** Enable the Forgejo package registry, then in the repo
    settings add:
-   - variable `REGISTRY_HOST` — the Forgejo host, e.g. `git.example.ts.net`
+   - variable `REGISTRY_HOST` — the Forgejo host, e.g. `registry.example.com`
    - secret `REGISTRY_TOKEN` — an access token with `write:package` scope
 
    The image reference is lowercased in the workflow before use: Docker refuses

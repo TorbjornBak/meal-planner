@@ -1,11 +1,11 @@
-import { parseIsoDuration } from "./durations";
+import { parseIsoDuration } from "./durations.ts";
 import {
   parseIngredientLine,
   parseRecipeText,
   parseServingsText,
   type ParsedIngredient,
   type ParsedRecipe,
-} from "./parse";
+} from "./parse.ts";
 
 /**
  * Recipe extraction from captured page HTML (§1, bookmarklet capture).

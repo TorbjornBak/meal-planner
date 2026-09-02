@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { recipeUrlFromBookmarkSearch } from "@/lib/bookmarkImport";
 import {
   DEFAULT_RECIPE_KIND,
   RECIPE_KINDS,
@@ -57,19 +58,33 @@ export default function NewRecipePage() {
   const [url, setUrl] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const bookmarkImportStarted = useRef(false);
+
+  // The bookmarklet changes pages instead of trying to POST across origins.
+  // Once this page owns the request, the normal same-origin import path can do
+  // its guarded server-side fetch without being blocked by the recipe site's
+  // CSP or CORS policy.
+  useEffect(() => {
+    if (bookmarkImportStarted.current) return;
+    const bookmarkedUrl = recipeUrlFromBookmarkSearch(window.location.search);
+    if (!bookmarkedUrl) return;
+
+    bookmarkImportStarted.current = true;
+    setUrl(bookmarkedUrl);
+    void importUrl(bookmarkedUrl);
+  }, []);
 
   // Fast path: paste a URL, let the server fetch and parse the page, then land
   // on the edit page for the mandatory review-and-edit step. On failure (bot
-  // wall, JS-only, paywall) it tells you to use the bookmarklet, which always
-  // works because it's your real browser.
-  async function importUrl() {
+  // wall, JS-only, paywall) it tells you to paste the recipe text instead.
+  async function importUrl(candidate = url) {
     setImporting(true);
     setImportError(null);
     try {
       const res = await fetch("/api/import", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: candidate }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -146,7 +161,7 @@ export default function NewRecipePage() {
                 if (e.key === "Enter" && url.trim() && !importing) importUrl();
               }}
             />
-            <button onClick={importUrl} disabled={importing || !url.trim()}>
+            <button onClick={() => importUrl()} disabled={importing || !url.trim()}>
               {importing ? "Fetching…" : "Fetch from URL"}
             </button>
           </div>
@@ -158,7 +173,7 @@ export default function NewRecipePage() {
 
           <p className="muted" style={{ marginTop: 16 }}>
             Or copy the recipe text and paste it below — if a site blocks the
-            fetch above, this and the bookmarklet always work.
+            fetch above, pasted text still works.
           </p>
           <textarea
             value={text}

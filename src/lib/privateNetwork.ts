@@ -12,12 +12,11 @@
  * them is somewhere a pasted URL or a page's own declared photo URL
  * shouldn't be able to send this server.
  *
- * This app runs on a home box reachable over a private Tailscale tailnet
- * (§10). That is what makes 100.64.0.0/10 — carrier-grade-NAT space, not one
- * of the RFC 1918 ranges a generic "is this a public IP" check usually
- * stops at — the range that matters most here: it is Tailscale's own address
- * space, so without it a pasted recipe URL could probe every other machine
- * on the household's tailnet, not just the box's own loopback.
+ * The app may run behind a private network (§10). That makes
+ * 100.64.0.0/10 — carrier-grade-NAT space, not one of the RFC 1918 ranges a
+ * generic "is this a public IP" check usually stops at — important to block:
+ * without it a pasted recipe URL could probe another host on the deployment's
+ * private network, not just this server's own loopback.
  *
  * Every classifier here takes a plain address string and returns the name of
  * the range it falls in, or null for "nothing here objects" — never a throw.
@@ -111,7 +110,7 @@ const IPV4_RANGES: Array<{
   { name: "private-use", test: (a) => a === 10 }, // 10.0.0.0/8
   { name: "private-use", test: (a, b) => a === 172 && b >= 16 && b <= 31 }, // 172.16.0.0/12
   { name: "private-use", test: (a, b) => a === 192 && b === 168 }, // 192.168.0.0/16
-  // Tailscale's own address space (§10) — see the module comment above.
+  // Carrier-grade NAT space (§10) — see the module comment above.
   { name: "carrier-grade-nat", test: (a, b) => a === 100 && b >= 64 && b <= 127 }, // 100.64.0.0/10
   { name: "link-local", test: (a, b) => a === 169 && b === 254 }, // 169.254.0.0/16
   { name: "ietf-protocol-assignments", test: (a, b, c) => a === 192 && b === 0 && c === 0 }, // 192.0.0.0/24
@@ -227,8 +226,7 @@ export function classifyIPv6(host: string): string | null {
 export function classifyAddress(raw: string): string | null {
   const host = raw.trim().toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost")) return "localhost";
-  // Not an IANA-assigned TLD; used by this deployment's own Tailscale
-  // MagicDNS names and by convention for other private infrastructure.
+  // Not an IANA-assigned TLD; commonly used for private infrastructure.
   if (host.endsWith(".internal")) return "internal-tld";
   return host.includes(":") ? classifyIPv6(host) : classifyIPv4(host);
 }

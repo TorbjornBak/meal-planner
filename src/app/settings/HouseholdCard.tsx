@@ -163,7 +163,7 @@ export function HouseholdCard() {
    * Copy the invite link.
    *
    * The clipboard API is only available in a secure context, and a household
-   * reaching the box over plain http on the tailnet isn't in one (§10). So the
+   * reaching the box over plain http isn't in one (§10). So the
    * link lives in a real input that can be selected by hand, and a refused copy
    * says so instead of silently doing nothing.
    */

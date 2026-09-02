@@ -15,6 +15,8 @@ import {
   TRANSFER_FORMAT,
   TRANSFER_VERSION,
   buildTransferFile,
+  isFetchableSource,
+  photoTargetsForImport,
   parseTransferFile,
   planImport,
   toRecipeCreateData,
@@ -306,6 +308,58 @@ test("a file carrying the same recipe twice only imports it once", () => {
     ["Lasagne", "Frikadeller"],
   );
   assert.equal(skipped.length, 1);
+});
+
+test("a re-import retries the photo for a matching pictureless recipe", () => {
+  const recipe = toTransferRecipe(row({ source: "https://example.test/lasagne" }));
+
+  assert.deepEqual(
+    photoTargetsForImport({
+      created: [],
+      skipped: [recipe],
+      existing: [
+        {
+          id: "already-there",
+          name: "  LASAGNE ",
+          source: "https://example.test/lasagne",
+          hasImage: false,
+        },
+      ],
+    }),
+    ["already-there"],
+  );
+});
+
+test("the photo pass targets new web recipes but not unusable or already-complete ones", () => {
+  const recipe = toTransferRecipe(row({ source: "https://example.test/lasagne" }));
+
+  assert.deepEqual(
+    photoTargetsForImport({
+      created: [
+        { id: "new-web", source: "https://example.test/new" },
+        { id: "new-book", source: "River Cottage, p. 212" },
+      ],
+      skipped: [recipe],
+      existing: [
+        {
+          id: "has-photo",
+          name: "Lasagne",
+          source: "https://example.test/lasagne",
+          hasImage: true,
+        },
+      ],
+    }),
+    ["new-web"],
+  );
+});
+
+test("only http(s) source links are eligible for a photo fetch", () => {
+  assert.equal(isFetchableSource(" https://example.test/recipe "), true);
+  assert.equal(isFetchableSource("http://example.test/recipe"), true);
+  assert.equal(isFetchableSource("River Cottage, p. 212"), false);
+  assert.equal(isFetchableSource("file:///etc/passwd"), false);
+  assert.equal(isFetchableSource("javascript:alert(1)"), false);
+  assert.equal(isFetchableSource(null), false);
 });
 
 // --- Dinner or drink (§2c) ---------------------------------------------------

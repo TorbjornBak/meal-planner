@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { extractRecipeImageUrl } from "@/lib/html";
-import { fetchImage, normalizeMime, resolvePublicUrl } from "@/lib/image";
-import { fetchPageHtml } from "@/lib/fetchPage";
+import { normalizeMime, resolvePublicUrl } from "@/lib/image";
 import { MAX_IMAGE_BYTES } from "@/lib/recipeImage";
+import { fetchRecipeImageFromSource } from "@/lib/recipeImageSource";
 import { currentHouseholdContext } from "@/lib/currentUser";
 
 // The recipe photo. Stored in the database like receipt photos (§7) so the app
@@ -42,7 +41,7 @@ export async function GET(
   // `resolvePublicUrl` by both writers (`imageFromSource` below and
   // `createRecipeFromHtml`), but DNS is not a fact fixed at the moment it was
   // saved — a host that resolved to a public address then can resolve
-  // somewhere this server refuses to fetch (the household's own tailnet, its
+  // somewhere this server refuses to fetch (a private network, its
   // loopback) by the time somebody opens the recipe, same as the redirect
   // hop this module already re-checks in `guardedFetch`. A stale/rebound
   // target is quietly treated as "no image" rather than followed.
@@ -107,7 +106,7 @@ export async function POST(
       { status: 415 },
     );
   } else {
-    const found = await imageFromSource(recipe.sourceHtml, recipe.source);
+    const found = await fetchRecipeImageFromSource(recipe.sourceHtml, recipe.source);
     if (!found) {
       return NextResponse.json(
         { error: "no image found on the source page" },
@@ -147,31 +146,4 @@ export async function DELETE(
     data: { image: null, imageMime: null, imageUrl: null },
   });
   return NextResponse.json({ ok: true });
-}
-
-/** Find and download the photo the recipe's source page advertises. */
-async function imageFromSource(
-  sourceHtml: string | null,
-  source: string | null,
-): Promise<{ bytes: Buffer; mime: string; imageUrl: string } | null> {
-  const pageUrl = source ? await resolvePublicUrl(source) : null;
-
-  let html = sourceHtml;
-  if (!html && pageUrl) {
-    // The one case where we fetch a recipe page ourselves rather than having
-    // your browser hand it to us (§1). It only happens when you ask for it,
-    // on a recipe you already saved with a link. This used to be a second,
-    // ad hoc `fetch` here with none of `fetchPageHtml`'s guarantees — no
-    // redirect re-checking, no size cap — so it's the same call the
-    // paste-a-URL import makes rather than a hand-rolled copy of it.
-    html = (await fetchPageHtml(pageUrl))?.html ?? null;
-  }
-  if (!html) return null;
-
-  const raw = extractRecipeImageUrl(html);
-  const imageUrl = raw ? await resolvePublicUrl(raw, pageUrl) : null;
-  if (!imageUrl) return null;
-
-  const image = await fetchImage(imageUrl);
-  return image ? { ...image, imageUrl } : null;
 }

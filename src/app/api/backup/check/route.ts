@@ -11,7 +11,7 @@ import { checkRepository } from "@/lib/backups";
  * separates "can't get there" from "got there and the backup itself broke".
  *
  * The real error is returned rather than flattened, for the same reason it is
- * there: everyone with a session is a household member on the tailnet (§10),
+ * there: everyone with a session is a household member (§10),
  * and the person reading this is the person who can go and fix the setting.
  */
 export async function POST() {

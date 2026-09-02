@@ -8,7 +8,7 @@ import { currentHouseholdContext } from "@/lib/currentUser";
 // lib/ocr.ts — so this stays a suggestion the human confirms, never an
 // authority: nothing here writes to the ledger.
 
-// Tesseract is CPU-bound and a receipt takes a second or two on the home box.
+// Tesseract is CPU-bound and a receipt takes a second or two on ordinary server hardware.
 export const maxDuration = 60;
 
 /** Generous for a phone photo, small enough that a bad upload fails fast. */

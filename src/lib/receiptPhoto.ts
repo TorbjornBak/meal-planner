@@ -13,9 +13,8 @@
  * file announcing itself as `text/html`, and opening the receipt URL renders
  * attacker-authored markup as a document on the app's own origin, with the
  * session cookie attached to every request it then makes. It needs an account
- * to plant, which on a one-household tailnet box made it nearly theoretical;
- * it stops being theoretical the moment two households who don't know each
- * other share an installation and the box is reachable from the open internet.
+ * to plant, but becomes a serious concern whenever an installation is
+ * reachable from the open internet.
  *
  * So the type is checked against an allowlist at upload, and — because rows
  * written before this existed are still in the database — checked *again* on

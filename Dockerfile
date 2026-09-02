@@ -18,7 +18,7 @@ RUN npx prisma generate && npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 # HOSTNAME=0.0.0.0 so the server binds all interfaces and the published port is
-# reachable from the host (where `tailscale serve` proxies it).
+# reachable from the host (where Caddy proxies it).
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
 
 # Backups (§11). borg writes the archives, pg_dump produces what goes into

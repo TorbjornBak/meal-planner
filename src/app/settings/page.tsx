@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { bookmarkletForOrigin } from "@/lib/bookmarkImport";
+import { runPhotoPass } from "@/lib/photoPass";
 import { AccountCard } from "./AccountCard";
 import { BackupCard } from "./BackupCard";
 import { HouseholdCard } from "./HouseholdCard";
@@ -14,6 +16,7 @@ export default function SettingsPage() {
   const [savedSize, setSavedSize] = useState<number | null>(null);
   const [pantryCount, setPantryCount] = useState<number | null>(null);
   const [bookmarklet, setBookmarklet] = useState("");
+  const [bookmarkletCopyStatus, setBookmarkletCopyStatus] = useState<string | null>(null);
   const bmRef = useRef<HTMLAnchorElement>(null);
   // Recipe library transfer (§2, §11). `importBusy` guards the double-click;
   // the two message slots are kept apart because a failed import and a
@@ -22,6 +25,11 @@ export default function SettingsPage() {
   const [importBusy, setImportBusy] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [importErr, setImportErr] = useState<string | null>(null);
+  const [photoPass, setPhotoPass] = useState<{
+    done: number;
+    total: number;
+    found: number;
+  } | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -34,19 +42,7 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((items) => setPantryCount(Array.isArray(items) ? items.length : null))
       .catch(() => {});
-    fetch("/api/capture/info")
-      .then((r) => r.json())
-      .then((d) => {
-        const origin = window.location.origin;
-        const code = `javascript:(function(){var h=${JSON.stringify(
-          d.householdId,
-        )},t=${JSON.stringify(
-          d.token,
-        )},b=${JSON.stringify(
-          origin,
-        )};fetch(b+'/api/capture',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({householdId:h,token:t,url:location.href,html:document.documentElement.outerHTML})}).then(function(r){return r.json()}).then(function(x){if(x&&x.id){if(confirm('Saved to MealPlanner. Open to review?'))location.href=b+'/recipes/'+x.id+'/edit'}else{alert('Capture failed: '+((x&&x.error)||'unknown'))}}).catch(function(e){alert('Capture failed: '+e)})})();`;
-        setBookmarklet(code);
-      });
+    setBookmarklet(bookmarkletForOrigin(window.location.origin));
   }, []);
 
   // React refuses to render a javascript: href, so set it imperatively.
@@ -66,6 +62,15 @@ export default function SettingsPage() {
     setSavedSize(s.householdSize);
   }
 
+  async function copyBookmarklet() {
+    try {
+      await navigator.clipboard.writeText(bookmarklet);
+      setBookmarkletCopyStatus("Bookmarklet code copied.");
+    } catch {
+      setBookmarkletCopyStatus("Couldn't copy it automatically. Try dragging the button instead.");
+    }
+  }
+
   async function importLibrary(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || importBusy) return;
@@ -73,6 +78,7 @@ export default function SettingsPage() {
     setImportBusy(true);
     setImportMsg(null);
     setImportErr(null);
+    setPhotoPass(null);
     try {
       // Parsed here as well as on the server so a file that was never JSON
       // fails on this side of the network, where the answer is instant.
@@ -103,7 +109,7 @@ export default function SettingsPage() {
         return;
       }
 
-      const { imported = 0, skipped = 0, skippedNames = [] } = data ?? {};
+      const { imported = 0, skipped = 0, skippedNames = [], photoTargets = [] } = data ?? {};
       const parts: string[] = [
         imported === 0
           ? "Nothing new to import."
@@ -117,6 +123,27 @@ export default function SettingsPage() {
         );
       }
       setImportMsg(parts.join(" "));
+
+      const targets = Array.isArray(photoTargets)
+        ? photoTargets.filter((id): id is string => typeof id === "string")
+        : [];
+      if (targets.length) {
+        const found = await runPhotoPass(
+          targets,
+          async (id) => {
+            const res = await fetch(`/api/recipes/${id}/image`, {
+              method: "POST",
+              // A non-image body tells this route to use the recipe's source.
+              headers: { "content-type": "application/json" },
+              body: "{}",
+            });
+            return res.ok;
+          },
+          setPhotoPass,
+        );
+        setPhotoPass(null);
+        setImportMsg(`${parts.join(" ")} ${describePhotos(found, targets.length)}`);
+      }
     } catch {
       setImportErr("Couldn't reach the server — nothing was imported.");
     } finally {
@@ -169,18 +196,19 @@ export default function SettingsPage() {
       </div>
 
       <div className="card">
-        <h2>Capture recipes from the web</h2>
+        <h2>Save recipes from the web</h2>
         <p className="muted">
           Drag this button to your bookmarks bar. On a recipe page, click it — it
-          sends the page to MealPlanner, which parses it and opens it for review.
-          No copy-paste needed.
+          opens the link in MealPlanner, which fetches it and opens the recipe for
+          review. No copy-paste needed.
         </p>
         {bookmarklet ? (
-          <p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {/* href set imperatively above (React blocks javascript: hrefs) */}
             <a
               ref={bmRef}
               onClick={(e) => e.preventDefault()}
+              aria-label="Save to MealPlanner bookmarklet. Drag it to the bookmarks bar."
               style={{
                 display: "inline-block",
                 padding: "6px 12px",
@@ -192,13 +220,18 @@ export default function SettingsPage() {
             >
               📎 Save to MealPlanner
             </a>
-          </p>
+            <button type="button" onClick={copyBookmarklet}>
+              Copy bookmarklet code
+            </button>
+          </div>
         ) : (
           <p className="muted">Loading…</p>
         )}
+        {bookmarkletCopyStatus && <p role="status">{bookmarkletCopyStatus}</p>}
         <p className="muted" style={{ fontSize: "0.85em" }}>
-          Generate this from your Tailscale <code>https://…ts.net</code> address so
-          the button points at the right place and works from other sites.
+          The button points to this MealPlanner address. Drag a fresh copy if the
+          app ever moves to a different domain. On a keyboard-only device, copy
+          the code and paste it into a new bookmark&rsquo;s address field.
         </p>
       </div>
 
@@ -226,14 +259,21 @@ export default function SettingsPage() {
             />
           </label>
         </p>
-        {importBusy && <p className="muted">Importing…</p>}
+        {importBusy && !photoPass && <p className="muted">Importing…</p>}
         {importMsg && <p>{importMsg}</p>}
+        {photoPass && (
+          <p className="muted">
+            Fetching photos from the source pages — {photoPass.done} of {photoPass.total} tried,
+            {" "}{photoPass.found} found. The recipes are already saved; any missing photo can be
+            added on the recipe itself.
+          </p>
+        )}
         {importErr && <p style={{ color: "var(--accent)" }}>{importErr}</p>}
         <p className="muted" style={{ fontSize: "0.85em" }}>
-          Photos aren't included — they're stored as raw image data (§2b), and
-          packing them in would turn a file you can open in a text editor into
-          tens of megabytes. Everything else travels: ingredients, method, tags,
-          servings and cook times.
+          Photos aren't included in the file — they're stored as raw image data (§2b), and
+          packing them in would turn a file you can open in a text editor into tens of megabytes.
+          Recipes with a web link as their source have their photo fetched from that page afterwards.
+          Everything else travels: ingredients, method, tags, servings and cook times.
         </p>
       </div>
 
@@ -242,4 +282,16 @@ export default function SettingsPage() {
       <BackupCard />
     </>
   );
+}
+
+function describePhotos(found: number, tried: number): string {
+  if (found === 0) {
+    return `No photos could be fetched from the ${tried} source ${
+      tried === 1 ? "page" : "pages"
+    } — you can add pictures on each recipe.`;
+  }
+  if (found === tried) {
+    return `Fetched ${found} ${found === 1 ? "photo" : "photos"} from the source pages.`;
+  }
+  return `Fetched ${found} of ${tried} photos from the source pages; the rest can be added on the recipe.`;
 }

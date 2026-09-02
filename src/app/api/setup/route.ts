@@ -14,11 +14,14 @@ import {
 import { hashPassword, passwordProblem } from "@/lib/password";
 import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
+import { verifyTurnstile } from "@/lib/turnstile";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
 const Input = z.object({
   email: z.string().min(1).max(320),
   name: z.string().max(120).optional(),
   password: z.string().min(1).max(200),
+  "cf-turnstile-response": z.unknown().optional(),
 });
 
 // The expand/backfill migration creates this household for both upgraded and
@@ -46,8 +49,8 @@ function isSetupRace(error: unknown): boolean {
  *
  * Open to anyone, but only while the instance has no accounts at all. The
  * moment one exists this route is closed for good and further members arrive
- * by invitation. On a home box behind Tailscale (§10) the window is only
- * reachable from the tailnet anyway.
+ * by invitation. The deployment's reverse proxy and HTTPS boundary protect
+ * the public setup endpoint while it is open (§10).
  */
 export async function POST(req: Request) {
   if (!(await needsSetup())) {
@@ -67,6 +70,10 @@ export async function POST(req: Request) {
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid" }, { status: 400 });
+  }
+
+  if (!(await verifyTurnstile(req, parsed.data["cf-turnstile-response"], TURNSTILE_ACTIONS.setup))) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const email = normalizeEmail(parsed.data.email);

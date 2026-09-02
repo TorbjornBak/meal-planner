@@ -3,8 +3,8 @@
  *
  * A recipe page advertises its photo in its metadata (see
  * `extractRecipeImageUrl`). We download that one image and store the bytes
- * ourselves rather than hotlinking: the app has to work offline over Tailscale
- * (§10), and a hotlinked photo dies the day the source site reorganizes.
+ * ourselves rather than hotlinking: the app has to work when temporarily
+ * offline (§10), and a hotlinked photo dies the day the source site reorganizes.
  *
  * `resolvePublicUrl` below is the shared private-network guard for every URL
  * the server fetches — both the photo here and, for the paste-a-URL import
@@ -43,7 +43,7 @@ export interface FetchedImage {
  * Returns null for anything that isn't a plain http(s) URL with no embedded
  * credentials, on the default port, whose hostname resolves only to public
  * addresses — including a private-network address, so a malicious recipe
- * page can't use the capture endpoint to probe the household's own tailnet
+ * page can't use the capture endpoint to probe private network addresses
  * (§10) or the box's own loopback.
  *
  * This is async, unlike a plain hostname-string check, because "resolves
@@ -218,7 +218,7 @@ function requestPinned(
  *
  * `fetch(url, { redirect: "follow" })` validates only the URL you handed it;
  * a public, allowed URL can still 302 straight to `http://169.254.169.254/`
- * or a tailnet peer, and the browser-style automatic follow would take it
+ * or another private-network host, and the browser-style automatic follow would take it
  * there without this module ever seeing the address. Handling redirects by
  * hand — `redirect: "manual"`, read `Location`, validate, repeat — means the
  * address on every hop, not just the first, goes through `resolvePublicUrl`.

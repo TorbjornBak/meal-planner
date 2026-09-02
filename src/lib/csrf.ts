@@ -135,7 +135,7 @@ function originOfUrl(raw: string | null): string | null {
  * check circular: whatever `Host` an attacker's request carries would always
  * equal itself, so nothing could ever fail. It also happens to be wrong in
  * this deployment even before considering attackers — HTTPS terminates at
- * `tailscale serve` and is forwarded to loopback (§10), so the `Host` this
+ * public TLS terminator and is forwarded to loopback (§10), so the `Host` this
  * process actually sees can be `127.0.0.1:3000` regardless of what the
  * browser's address bar said (the same reason
  * src/app/api/newsletter/unsubscribe/route.ts builds its landing URL from
@@ -144,8 +144,8 @@ function originOfUrl(raw: string | null): string | null {
  * Outside production this falls back to the request's own origin instead of
  * refusing everything: `npm run dev` talks to itself on plain HTTP with no
  * proxy in front of it, so there is no untrusted hop for `Host` to lie about,
- * and `.env.example`'s `APP_URL` is a tailnet HTTPS address a developer's
- * local server will never actually be reached at. Refusing every mutation in
+ * and `.env.example`'s `APP_URL` is a public HTTPS address a developer's local
+ * server will never actually be reached at. Refusing every mutation in
  * dev because the placeholder doesn't match `localhost` would just teach
  * whoever hits it to weaken the check instead of configuring `APP_URL`
  * properly before going anywhere near production.

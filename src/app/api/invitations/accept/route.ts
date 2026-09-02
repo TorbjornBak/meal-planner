@@ -11,6 +11,8 @@ import { hashPassword, passwordProblem } from "@/lib/password";
 import { acceptInvitation, inspectInvitation } from "@/lib/invitationService";
 import { consumeAll, recordThrottleOnce, tooManyRequests } from "@/lib/rateLimit";
 import { clientIp } from "@/lib/rateLimitPolicy";
+import { verifyTurnstile } from "@/lib/turnstile";
+import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
 
 /**
  * POST /api/invitations/accept — spend an invitation (§9).
@@ -37,6 +39,7 @@ const Input = z.object({
   name: z.string().max(120).optional(),
   /** Only for a platform invitation, which creates the household. */
   householdName: z.string().max(120).optional(),
+  "cf-turnstile-response": z.unknown().optional(),
 });
 
 /** The refusals that are the visitor's link being wrong, not their input. */
@@ -45,6 +48,16 @@ const LINK_PROBLEMS = new Set(["invalid-token", "expired", "revoked", "accepted"
 export async function POST(req: Request) {
   const parsed = Input.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid" }, { status: 400 });
+
+  if (
+    !(await verifyTurnstile(
+      req,
+      parsed.data["cf-turnstile-response"],
+      TURNSTILE_ACTIONS.invitationAccept,
+    ))
+  ) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
 
   const ip = clientIp(req.headers);
 
