@@ -154,3 +154,10 @@ test("Permissions-Policy denies the powerful features this app never uses", () =
     assert.match(headers["Permissions-Policy"], new RegExp(`${feature}=\\(\\)`));
   }
 });
+
+test("disabled Turnstile removes Cloudflare from the CSP", () => {
+  const value = csp({ turnstileEnabled: false });
+  assert.doesNotMatch(value, /challenges\.cloudflare\.com/);
+  assert.match(value, /connect-src 'self'/);
+  assert.match(value, /frame-src 'none'/);
+});

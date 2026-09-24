@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { safeNextPath } from "@/lib/safeRedirect";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
 import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
+import { useTurnstileEnabled } from "@/components/TurnstileConfig";
 
 // Sign in (§9). An account gates entry and, since the multi-household work,
 // also decides what there is to see: the session carries an active household
@@ -18,13 +19,14 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const turnstileEnabled = useTurnstileEnabled();
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!turnstileToken) {
+    if (turnstileEnabled && !turnstileToken) {
       setError("Complete the verification before signing in.");
       return;
     }
@@ -91,13 +93,15 @@ function LoginForm() {
             style={{ display: "block", width: "100%", padding: "0.5rem", marginTop: 4 }}
           />
         </label>
-        <TurnstileWidget
-          ref={turnstileRef}
-          action={TURNSTILE_ACTIONS.login}
-          onTokenChange={setTurnstileToken}
-        />
+        {turnstileEnabled && (
+          <TurnstileWidget
+            ref={turnstileRef}
+            action={TURNSTILE_ACTIONS.login}
+            onTokenChange={setTurnstileToken}
+          />
+        )}
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
+        <button type="submit" disabled={busy || (turnstileEnabled && !turnstileToken)} style={{ marginTop: 12 }}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>

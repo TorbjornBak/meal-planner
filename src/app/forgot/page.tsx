@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
 import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
+import { useTurnstileEnabled } from "@/components/TurnstileConfig";
 
 // "Forgot password" (§9) — ask for a reset link by email.
 export default function ForgotPage() {
@@ -11,13 +12,14 @@ export default function ForgotPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const turnstileEnabled = useTurnstileEnabled();
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!turnstileToken) {
+    if (turnstileEnabled && !turnstileToken) {
       setError("Complete the verification before requesting a link.");
       return;
     }
@@ -84,13 +86,15 @@ export default function ForgotPage() {
                 style={{ display: "block", width: "100%", padding: "0.5rem", marginTop: 4 }}
               />
             </label>
-            <TurnstileWidget
-              ref={turnstileRef}
-              action={TURNSTILE_ACTIONS.passwordForgot}
-              onTokenChange={setTurnstileToken}
-            />
+            {turnstileEnabled && (
+              <TurnstileWidget
+                ref={turnstileRef}
+                action={TURNSTILE_ACTIONS.passwordForgot}
+                onTokenChange={setTurnstileToken}
+              />
+            )}
             {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-            <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
+            <button type="submit" disabled={busy || (turnstileEnabled && !turnstileToken)} style={{ marginTop: 12 }}>
               {busy ? "Sending…" : "Email me a link"}
             </button>
           </form>

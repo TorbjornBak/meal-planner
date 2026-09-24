@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
 import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
+import { useTurnstileEnabled } from "@/components/TurnstileConfig";
 
 /**
  * Choose a new password against a one-time emailed reset link (§9).
@@ -23,6 +24,7 @@ export function ResetForm({
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const turnstileEnabled = useTurnstileEnabled();
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
@@ -34,7 +36,7 @@ export function ResetForm({
       setError("Those two passwords don't match.");
       return;
     }
-    if (!turnstileToken) {
+    if (turnstileEnabled && !turnstileToken) {
       setError("Complete the verification before saving your password.");
       return;
     }
@@ -104,13 +106,15 @@ export function ResetForm({
         <p style={{ color: "var(--muted)", fontSize: 13, marginTop: 8 }}>
           At least {minLength} characters.
         </p>
-        <TurnstileWidget
-          ref={turnstileRef}
-          action={TURNSTILE_ACTIONS.passwordReset}
-          onTokenChange={setTurnstileToken}
-        />
+        {turnstileEnabled && (
+          <TurnstileWidget
+            ref={turnstileRef}
+            action={TURNSTILE_ACTIONS.passwordReset}
+            onTokenChange={setTurnstileToken}
+          />
+        )}
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
+        <button type="submit" disabled={busy || (turnstileEnabled && !turnstileToken)} style={{ marginTop: 12 }}>
           {busy ? "Saving…" : "Save new password"}
         </button>
       </form>

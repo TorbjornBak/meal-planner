@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
 import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
+import { useTurnstileEnabled } from "@/components/TurnstileConfig";
 
 /**
  * First run (§9) — create the household's first account.
@@ -20,6 +21,7 @@ export default function SetupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const turnstileEnabled = useTurnstileEnabled();
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
@@ -36,7 +38,7 @@ export default function SetupPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!turnstileToken) {
+    if (turnstileEnabled && !turnstileToken) {
       setError("Complete the verification before creating the account.");
       return;
     }
@@ -120,13 +122,15 @@ export default function SetupPage() {
             style={{ display: "block", width: "100%", padding: "0.5rem", marginTop: 4 }}
           />
         </label>
-        <TurnstileWidget
-          ref={turnstileRef}
-          action={TURNSTILE_ACTIONS.setup}
-          onTokenChange={setTurnstileToken}
-        />
+        {turnstileEnabled && (
+          <TurnstileWidget
+            ref={turnstileRef}
+            action={TURNSTILE_ACTIONS.setup}
+            onTokenChange={setTurnstileToken}
+          />
+        )}
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
-        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
+        <button type="submit" disabled={busy || (turnstileEnabled && !turnstileToken)} style={{ marginTop: 12 }}>
           {busy ? "Creating…" : "Create account"}
         </button>
       </form>

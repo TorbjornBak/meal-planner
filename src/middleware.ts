@@ -4,6 +4,7 @@ import { SESSION_COOKIE, getSessionUser, needsSetup } from "@/lib/auth";
 import { csrfVerdict, expectedOrigin } from "@/lib/csrf";
 import { isPublicPage } from "@/lib/publicPages";
 import { httpsIsGuaranteed, securityHeaders } from "@/lib/securityHeaders";
+import { turnstileEnabled } from "@/lib/turnstileConfig";
 
 /**
  * Gate every page and API route behind a signed-in account (§9), refuse the
@@ -124,7 +125,12 @@ export async function middleware(req: NextRequest) {
     nodeEnv: process.env.NODE_ENV,
     appUrl: process.env.APP_URL,
   });
-  const headerList = securityHeaders({ nonce, allowEval, httpsGuaranteed });
+  const headerList = securityHeaders({
+    nonce,
+    allowEval,
+    httpsGuaranteed,
+    turnstileEnabled: turnstileEnabled(process.env),
+  });
 
   function finish(res: NextResponse): NextResponse {
     for (const [name, value] of headerList) {

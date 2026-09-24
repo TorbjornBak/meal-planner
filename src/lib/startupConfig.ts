@@ -26,6 +26,8 @@
  * that failure to the one place someone is actually watching the logs.
  */
 
+import { turnstileEnabled } from "./turnstileConfig.ts";
+
 export interface StartupFinding {
   /** The environment variable this finding is about. */
   variable: string;
@@ -280,8 +282,10 @@ function checkCronSecret(env: NodeJS.ProcessEnv, findings: StartupFinding[]): vo
   );
 }
 
-/** Turnstile gates every anonymous way into an account, so missing config is a startup failure. */
+/** When enabled, missing Turnstile configuration is a startup failure. */
 function checkTurnstileConfig(env: NodeJS.ProcessEnv, findings: StartupFinding[]): void {
+  if (!turnstileEnabled(env)) return;
+
   const secret = env.TURNSTILE_SECRET?.trim() ?? "";
   if (!secret) {
     findings.push({
