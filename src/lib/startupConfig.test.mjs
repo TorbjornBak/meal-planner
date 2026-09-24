@@ -310,3 +310,23 @@ test("in production, a single problem still blocks", () => {
   assert.equal(blocking.length, 1);
   assert.equal(blocking[0].variable, "AUTH_SECRET");
 });
+
+test("explicit opt-out allows missing Turnstile credentials", () => {
+  const env = validEnv({
+    TURNSTILE_ENABLED: "false",
+    TURNSTILE_SECRET: undefined,
+    TURNSTILE_HOSTNAMES: undefined,
+  });
+  assert.deepEqual(findingsFor("TURNSTILE_SECRET", env), []);
+  assert.deepEqual(findingsFor("TURNSTILE_HOSTNAMES", env), []);
+});
+
+test("other Turnstile switch values retain fail-closed startup checks", () => {
+  const env = validEnv({
+    TURNSTILE_ENABLED: "False",
+    TURNSTILE_SECRET: undefined,
+    TURNSTILE_HOSTNAMES: undefined,
+  });
+  assert.equal(findingsFor("TURNSTILE_SECRET", env).length, 1);
+  assert.equal(findingsFor("TURNSTILE_HOSTNAMES", env).length, 1);
+});

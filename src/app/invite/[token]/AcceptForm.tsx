@@ -7,6 +7,7 @@ import type { InvitationKind } from "@prisma/client";
 import { invitationPath, type AcceptancePlan } from "@/lib/invitations";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
 import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";
+import { useTurnstileEnabled } from "@/components/TurnstileConfig";
 
 /**
  * Spend an invitation (§9).
@@ -67,6 +68,7 @@ export function AcceptForm(props: {
   const [signInRequired, setSignInRequired] = useState(false);
   const [busy, setBusy] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const turnstileEnabled = useTurnstileEnabled();
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
@@ -82,7 +84,7 @@ export function AcceptForm(props: {
       setError("Give the household a name.");
       return;
     }
-    if (!turnstileToken) {
+    if (turnstileEnabled && !turnstileToken) {
       setError("Complete the verification before accepting the invitation.");
       return;
     }
@@ -284,13 +286,15 @@ export function AcceptForm(props: {
 
         {error && <p style={{ color: "var(--accent)" }}>{error}</p>}
 
-        <TurnstileWidget
-          ref={turnstileRef}
-          action={TURNSTILE_ACTIONS.invitationAccept}
-          onTokenChange={setTurnstileToken}
-        />
+        {turnstileEnabled && (
+          <TurnstileWidget
+            ref={turnstileRef}
+            action={TURNSTILE_ACTIONS.invitationAccept}
+            onTokenChange={setTurnstileToken}
+          />
+        )}
 
-        <button type="submit" disabled={busy || !turnstileToken} style={{ marginTop: 12 }}>
+        <button type="submit" disabled={busy || (turnstileEnabled && !turnstileToken)} style={{ marginTop: 12 }}>
           {busy ? "Joining…" : buttonLabel({ plan, kind, householdName })}
         </button>
       </form>

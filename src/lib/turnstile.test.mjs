@@ -135,3 +135,17 @@ test("Siteverify network and response failures are rejected instead of escaping"
   response = "non-ok";
   assert.equal(await verifyTurnstile(request, "third-token", "login"), false);
 });
+
+test("explicitly disabled Turnstile accepts a missing token without contacting Cloudflare", async (t) => {
+  const previous = process.env.TURNSTILE_ENABLED;
+  process.env.TURNSTILE_ENABLED = "false";
+  t.after(() => {
+    if (previous === undefined) delete process.env.TURNSTILE_ENABLED;
+    else process.env.TURNSTILE_ENABLED = previous;
+  });
+  const fetchMock = t.mock.method(globalThis, "fetch", async () => {
+    throw new Error("Cloudflare must not be contacted");
+  });
+  assert.equal(await verifyTurnstile(new Request("https://mealplanner.example/api/login"), undefined, "login"), true);
+  assert.equal(fetchMock.mock.callCount(), 0);
+});

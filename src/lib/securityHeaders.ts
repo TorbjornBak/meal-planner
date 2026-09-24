@@ -34,6 +34,8 @@ export interface CspInput {
    * between environments, and it is *only* this one.
    */
   allowEval: boolean;
+  /** Omit Cloudflare origins when Turnstile is disabled. */
+  turnstileEnabled?: boolean;
 }
 
 /**
@@ -84,7 +86,7 @@ export function buildCsp(input: CspInput): string {
     "'self'",
     `'nonce-${input.nonce}'`,
     "'strict-dynamic'",
-    "https://challenges.cloudflare.com",
+    input.turnstileEnabled !== false ? "https://challenges.cloudflare.com" : null,
     input.allowEval ? "'unsafe-eval'" : null,
   ]
     .filter((part): part is string => part !== null)
@@ -96,8 +98,12 @@ export function buildCsp(input: CspInput): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self'",
     "font-src 'self'",
-    "connect-src 'self' https://challenges.cloudflare.com",
-    "frame-src https://challenges.cloudflare.com",
+    input.turnstileEnabled === false
+      ? "connect-src 'self'"
+      : "connect-src 'self' https://challenges.cloudflare.com",
+    input.turnstileEnabled === false
+      ? "frame-src 'none'"
+      : "frame-src https://challenges.cloudflare.com",
     "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",

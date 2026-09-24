@@ -1,5 +1,6 @@
 import { clientIp } from "./rateLimitPolicy.ts";
 import type { TurnstileAction } from "./turnstileActions.ts";
+import { turnstileEnabled } from "./turnstileConfig.ts";
 
 const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
@@ -15,6 +16,7 @@ export async function verifyTurnstile(
   token: unknown,
   expectedAction: TurnstileAction,
 ): Promise<boolean> {
+  if (!turnstileEnabled(process.env)) return true;
   if (typeof token !== "string" || token.length === 0 || token.length > 2048) return false;
 
   const secret = process.env.TURNSTILE_SECRET?.trim();

@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ServiceWorkerRegistrar } from "./sw-register";
 import { TopNav } from "@/components/TopNav";
+import { TurnstileConfig } from "@/components/TurnstileConfig";
+import { turnstileEnabled } from "@/lib/turnstileConfig";
 
 /**
  * Forces every page through per-request rendering rather than Next's static
@@ -42,9 +44,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <ServiceWorkerRegistrar />
-        <TopNav />
-        <main className="container">{children}</main>
+        <TurnstileConfig enabled={turnstileEnabled(process.env)}>
+          <ServiceWorkerRegistrar />
+          <TopNav />
+          <main className="container">{children}</main>
+        </TurnstileConfig>
       </body>
     </html>
   );

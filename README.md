@@ -14,9 +14,12 @@ spend.
 - **Postgres + Prisma.**
 - **Docker Compose**: app + Postgres, served publicly through Cloudflare and Caddy.
 
-Cloudflare Turnstile is the app's one third-party API: every anonymous account-entry
-form fails closed through it before the existing handler runs. Recipe parsing is
-still a deterministic string parser (§1), not an LLM, and receipt OCR is Tesseract
+Cloudflare Turnstile protects anonymous account-entry forms by default. For a
+private, self-hosted local instance, set `TURNSTILE_ENABLED=false` in `.env`
+and restart the app. This hides the widget and skips server verification;
+existing rate limits still apply. Do not disable it on an internet-facing instance.
+
+Recipe parsing is still a deterministic string parser (§1), not an LLM, and receipt OCR is Tesseract
 compiled to WebAssembly, running in-process against a language model vendored in
 `tessdata/` (§7) — a library, not a service. The server also fetches directly from a
 recipe's own source site when asked, guarded against private-network addresses.
@@ -140,8 +143,9 @@ build` are all unaffected — see below.
 | `APP_URL` | Fatal | Fatal | Fatal if it doesn't parse as a URL, or isn't `https://` |
 | `DATABASE_URL` | Fatal, including blank credentials | Fatal if either credential is still `mealplanner` | Fatal if it doesn't parse |
 | `CRON_SECRET` | Fatal | Fatal | Fatal (< 20 characters) |
-| `TURNSTILE_SECRET` | Fatal | — | — |
-| `TURNSTILE_HOSTNAMES` | Fatal | — | Fatal if production includes `localhost` or `127.0.0.1` |
+| `TURNSTILE_ENABLED` | Defaults to enabled; set `false` only for a private local instance | — | — |
+| `TURNSTILE_SECRET` | Fatal when enabled | — | — |
+| `TURNSTILE_HOSTNAMES` | Fatal when enabled | — | Fatal if enabled in production and includes `localhost` or `127.0.0.1` |
 | `BORG_REPO` | — (backups simply off) | — | — |
 | `BORG_PASSPHRASE` | Fatal **only if `BORG_REPO` is set** | Fatal if `BORG_REPO` is set | Fatal (< 20 characters) if `BORG_REPO` is set |
 

@@ -44,6 +44,7 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-mealplanner}:${POSTGRES_PASSWORD:-mealplanner}@db:5432/${POSTGRES_DB:-mealplanner}?schema=public"
       AUTH_SECRET: ${AUTH_SECRET}
       # Cloudflare Turnstile protects every anonymous account-entry form.
+      TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-true}
       TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
       TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-}
       # Email (§9, §9b) — password resets, invitations, the weekly digest.
