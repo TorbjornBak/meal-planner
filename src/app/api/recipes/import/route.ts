@@ -8,6 +8,8 @@ import {
   transferKey,
 } from "@/lib/recipeTransfer";
 import { currentHouseholdContext } from "@/lib/currentUser";
+import { withImportRouteSecurity } from "@/lib/importRouteSecurity";
+import { readRecipeTransferBody } from "@/lib/readRecipeTransferBody";
 
 /**
  * POST /api/recipes/import — read a library export back in (§1, §2, §12).
@@ -30,35 +32,27 @@ import { currentHouseholdContext } from "@/lib/currentUser";
  * rather than merged, the whole import is one transaction, and every recipe
  * stays editable afterwards.
  *
- * No cap here on the file's own size beyond next.config.mjs's
- * `middlewareClientMaxBodySize` (11 MB): that's a deliberate choice, not a
- * gap — a library export is JSON text, one household's own recipes, from a
- * signed-in member re-importing what they already had, and a household with
- * enough recipes to threaten an 11 MB text file would be a very well-fed one.
- * Adding a tighter cap risks rejecting a real library for no security gain.
+ * The route bounds its own JSON body at 11 MB because it does not pass through
+ * middleware, whose body-cloning limit otherwise supplied that bound.
  */
 export async function POST(req: Request) {
+  return withImportRouteSecurity(req, () => importRecipes(req));
+}
+
+async function importRecipes(req: Request) {
   const context = await currentHouseholdContext();
   if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const householdId = context.household.id;
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      {
-        error:
-          "That file isn't valid JSON, so nothing in it could be read. If you edited it by hand, a missing comma or bracket is the usual cause.",
-      },
-      { status: 400 },
-    );
+  const upload = await readRecipeTransferBody(req);
+  if (!upload.ok) {
+    return NextResponse.json({ error: upload.message }, { status: upload.status });
   }
 
   // Shape, envelope and version are all `parseTransferFile`'s business, and it
   // returns a sentence rather than an error code — whoever is standing here
   // has a file they believe is a library and needs to know which part of it
   // this instance couldn't read.
-  const parsed = parseTransferFile(body);
+  const parsed = parseTransferFile(upload.body);
   if (!parsed.ok) {
     return NextResponse.json({ error: parsed.message }, { status: 400 });
   }
