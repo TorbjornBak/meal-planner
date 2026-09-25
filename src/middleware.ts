@@ -203,5 +203,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // The recipe JSON upload checks its own session, origin and security headers
+  // in the route. Skipping Node middleware avoids Next 15 body-clone races.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/recipes/import(?:/|$)).*)"],
 };
