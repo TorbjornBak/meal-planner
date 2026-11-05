@@ -54,3 +54,26 @@ test("handler failures remain JSON responses with security headers", async (t) =
   assert.match((await response.json()).error, /server could not complete/);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
 });
+
+test('photo scans enforce same-origin without disturbing the multipart body', async () => {
+  const form = new FormData();
+  form.append('photos', new File(['recipe text'], 'page.jpg', { type: 'image/jpeg' }));
+  const req = new Request('https://meals.example.test/api/recipes/scan', {
+    method: 'POST', headers: { origin: 'https://meals.example.test' }, body: form,
+  });
+  const response = await withImportRouteSecurity(req, async () => {
+    const upload = await req.formData();
+    assert.equal(await upload.get('photos').text(), 'recipe text');
+    return Response.json({ id: 'review-draft' }, { status: 201 });
+  }, env);
+  assert.equal(response.status, 201);
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+});
+test('cross-origin photo scans are rejected before reading files', async () => {
+  const req = new Request('https://meals.example.test/api/recipes/scan', {
+    method: 'POST', headers: { origin: 'https://attacker.example' }, body: 'unread photo',
+  });
+  const response = await withImportRouteSecurity(req, async () => { assert.fail('handler must not run'); }, env);
+  assert.equal(response.status, 403);
+  assert.equal(req.bodyUsed, false);
+});

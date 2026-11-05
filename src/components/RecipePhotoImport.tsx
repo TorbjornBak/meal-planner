@@ -17,8 +17,14 @@ export function RecipePhotoImport() {
       const body = new FormData();
       photos.forEach(photo => body.append("photos", photo));
       const response = await fetch("/api/recipes/scan", { method: "POST", body });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Scan failed.");
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        const fallback = response.status === 413 ? "Photos are too large. Try fewer or smaller photos."
+          : response.status === 401 ? "Your session expired. Sign in again, then retry the scan."
+          : `Scan failed (HTTP ${response.status}). Please try again or check the app logs.`;
+        throw new Error(typeof result?.error === "string" ? result.error : fallback);
+      }
+      if (!result?.id) throw new Error("The server returned an unexpected scan response. Please try again.");
       router.push(`/recipes/${result.id}/edit?new=1`);
     } catch (error) { setError(error instanceof Error ? error.message : "Scan failed. Please try again."); }
     finally { setBusy(false); }
