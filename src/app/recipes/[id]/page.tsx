@@ -67,6 +67,7 @@ export default async function RecipeDetailPage({
   const sections = recipe.instructions ? toSections(recipe.instructions) : [];
   const photo = recipeImageSrc(recipe);
 
+  const sourcePages = await prisma.recipeSourcePage.findMany({ where: { recipeId: recipe.id }, orderBy: { position: 'asc' }, select: { id: true, position: true } });
   return (
     <>
       <p style={{ display: "flex", justifyContent: "space-between" }}>
@@ -133,6 +134,14 @@ export default async function RecipeDetailPage({
         ) : null}
       </p>
 
+      {(recipe.bookTitle || recipe.bookAuthor || recipe.bookPage) && <p>
+        {[recipe.bookTitle, recipe.bookAuthor, recipe.bookPage ? `p. ${recipe.bookPage}` : null].filter(Boolean).join(' · ')}
+      </p>}
+      {recipe.tags.includes('manually added') && <p className="muted">manually added</p>}
+      {sourcePages.length > 0 && <details className="card">
+        <summary>Original recipe pages</summary>
+        {sourcePages.length ? sourcePages.map(page => <a key={page.id} href={`/api/recipes/${recipe.id}/pages/${page.id}`} target="_blank" rel="noreferrer" style={{ display: 'block' }}>View page {page.position + 1}</a>) : <p>No photographed pages attached.</p>}
+      </details>}
       <CookingMode />
 
       <div className="card">

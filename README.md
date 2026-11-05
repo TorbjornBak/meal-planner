@@ -473,3 +473,18 @@ APP_IMAGE=<registry-host>/<owner>/meal-planner:<sha> docker compose up -d
 This is a **scaffold**: the data model, config, deployment, and API surface are
 in place, along with the core parsing / scaling / aggregation logic. Page UIs
 are stubs marked with `TODO` pointing at the design section each implements.
+
+### Photographing a cookbook recipe
+
+In **Add a recipe → Scan a recipe**, take photos or upload up to six pages
+(10 MB total), arranging them in reading order. Local Tesseract scans Danish
+and English using the vendored models in `tessdata/`; no external OCR service
+or API key is required. Review and correct the title, servings, ingredients
+and method, and optionally fill in Book, Author and Page / pages before saving.
+Scans receive the `manually added` tag. Original pages and their OCR transcripts
+are retained with the recipe and available in the editor; page links are also
+available in the cooking view. Cancel discards a newly scanned recipe and its pages.
+Book details travel in recipe JSON exports; photos are excluded, as with existing
+recipe photos. Database backups retain the original pages.
+
+Apply database migrations (`npm run prisma:deploy`) before running this version.

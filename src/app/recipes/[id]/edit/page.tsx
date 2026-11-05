@@ -50,6 +50,9 @@ interface RecipeForm {
    * "Not said" filter is the list, and this select is the fix.
    */
   category: RecipeCategory | null;
+  bookTitle: string | null;
+  bookAuthor: string | null;
+  bookPage: string | null;
   source: string | null;
   instructions: string | null;
   statedServings: number;
@@ -75,8 +78,10 @@ export default function EditRecipePage({
   // cancel: the unreviewed draft goes away instead of quietly joining the
   // library.
   const isNewImport = useSearchParams().get("new") === "1";
+  const [sourcePages, setSourcePages] = useState<{ id: string; position: number; transcript: string }[]>([]);
   const [form, setForm] = useState<RecipeForm | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Deleting lives here rather than only in the library list because the
   // editor is where you find out a recipe isn't worth keeping — a bad parse,
@@ -101,6 +106,7 @@ export default function EditRecipePage({
     fetch(`/api/recipes/${id}`)
       .then((r) => r.json())
       .then((r) => {
+        setSourcePages(r.sourcePages ?? []);
         setHasPhoto(Boolean(r.imageMime || r.imageUrl));
         setPlannedNights(r._count?.dinnerSlots ?? 0);
         setForm({
@@ -113,6 +119,9 @@ export default function EditRecipePage({
           // by JSON.stringify on save, so clearing a wrong category would
           // silently do nothing.
           category: r.category ?? null,
+          bookTitle: r.bookTitle ?? null,
+          bookAuthor: r.bookAuthor ?? null,
+          bookPage: r.bookPage ?? null,
           source: r.source,
           instructions: r.instructions,
           statedServings: r.statedServings,
@@ -219,9 +228,10 @@ export default function EditRecipePage({
 
   async function save() {
     if (!form) return;
+    setSaveError(null);
     setBusy(true);
     try {
-      await fetch(`/api/recipes/${id}`, {
+      const response = await fetch(`/api/recipes/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -230,8 +240,11 @@ export default function EditRecipePage({
           ingredients: form.ingredients.filter((ing) => ing.name.trim()),
         }),
       });
+      if (!response.ok) throw new Error("Could not save. Check the name, servings and book details, then try again.");
       router.push(`/recipes/${id}`);
       router.refresh();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not save. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -378,6 +391,23 @@ export default function EditRecipePage({
             />
           </label>
         </div>
+        {saveError && <p role="alert">{saveError}</p>}
+        <fieldset style={{ marginTop: 16 }}>
+          <legend>Book source (optional)</legend>
+          {([['bookTitle', 'Book'], ['bookAuthor', 'Author'], ['bookPage', 'Page / pages']] as const).map(([key, label]) => (
+            <label key={key} style={{ display: 'block', marginBottom: 8 }}>{label}{' '}
+              <input value={form[key] ?? ''} onChange={e => setForm({ ...form, [key]: e.target.value || null })} />
+            </label>
+          ))}
+        </fieldset>
+        {sourcePages.length > 0 && <details style={{ marginTop: 16 }}>
+          <summary>Original recipe pages &amp; scanned text ({sourcePages.length}) · manually added</summary>
+          {sourcePages.map(page => <div key={page.id}>
+            <a href={`/api/recipes/${id}/pages/${page.id}`} target="_blank" rel="noreferrer">Open page {page.position + 1}</a>
+            <img src={`/api/recipes/${id}/pages/${page.id}`} alt={`Original recipe page ${page.position + 1}`} style={{ maxWidth: '100%', maxHeight: 600, display: 'block' }} />
+            <pre style={{ whiteSpace: 'pre-wrap' }}>{page.transcript}</pre>
+          </div>)}
+        </details>}
         {/*
           Where the number came from, said out loud, plus a way to get one for
           the recipes that arrived without one (anything pasted as text, and

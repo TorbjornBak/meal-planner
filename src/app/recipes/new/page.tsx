@@ -1,5 +1,6 @@
 "use client";
 
+import { RecipePhotoImport } from "@/components/RecipePhotoImport";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { recipeUrlFromBookmarkSearch } from "@/lib/bookmarkImport";
@@ -145,6 +146,7 @@ export default function NewRecipePage() {
     <>
       <h1>Add a recipe</h1>
 
+      {!draft && <RecipePhotoImport />}
       {!draft && (
         <div className="card">
           <p className="muted">

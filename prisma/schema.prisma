@@ -91,6 +91,10 @@ model Recipe {
   /// shown that way — never as "vegetarian" by omission.
   category            RecipeCategory?
   /// Where it came from (URL or free text). Optional — pasted plans may lack one.
+  bookTitle           String?
+  bookAuthor          String?
+  bookPage            String?
+  sourcePages         RecipeSourcePage[]
   source              String?
   /// The method/steps text, captured at parse time for the cooking view (§2).
   instructions        String?
@@ -812,4 +816,16 @@ model Settings {
   /// Default servings every recipe scales to (§4).
   householdSize Int       @default(2)
   updatedAt     DateTime  @updatedAt
+}
+
+/// Original photographed recipe pages, in reading order; removed with the recipe.
+model RecipeSourcePage {
+  id String @id @default(cuid())
+  recipeId String
+  recipe Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  position Int
+  photo Bytes
+  mime String
+  transcript String
+  @@unique([recipeId, position])
 }
