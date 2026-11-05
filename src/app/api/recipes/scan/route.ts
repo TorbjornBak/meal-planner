@@ -3,19 +3,23 @@ import sharp from "sharp";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext } from "@/lib/currentUser";
 import { scanRecipePage } from "@/lib/recipeOcr";
+import { withImportRouteSecurity } from "@/lib/importRouteSecurity";
+import { readRecipePhotoForm } from "@/lib/readRecipePhotoForm";
 import { parseRecipeScan } from "@/lib/parseRecipeScan";
 
 export const maxDuration = 300;
 const MAX_BYTES = 10 * 1024 * 1024;
 
 export async function POST(req: Request) {
+  return withImportRouteSecurity(req, () => scanRecipe(req));
+}
+
+async function scanRecipe(req: Request) {
   const context = await currentHouseholdContext();
   if (!context) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (Number(req.headers.get("content-length")) > MAX_BYTES + 65536)
-    return NextResponse.json({ error: "Photos must total less than 10 MB." }, { status: 413 });
-  let form: FormData;
-  try { form = await req.formData(); }
-  catch { return NextResponse.json({ error: "Expected photo uploads." }, { status: 400 }); }
+  const upload = await readRecipePhotoForm(req);
+  if (!upload.ok) return NextResponse.json({ error: upload.error }, { status: upload.status });
+  const { form } = upload;
   const files = form.getAll("photos");
   if (!files.length || files.length > 6 || files.some(f => !(f instanceof File) || !f.size || !f.type.startsWith("image/")))
     return NextResponse.json({ error: "Choose 1–6 recipe photos." }, { status: 400 });
