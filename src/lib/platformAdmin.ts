@@ -11,7 +11,7 @@
  * `npm test`.
  */
 
-import type { HouseholdRole, PlatformRole } from "@prisma/client";
+import type { HouseholdRole, PlatformRole } from "@/generated/prisma/client";
 
 /** Everything an authorization decision here is allowed to look at. */
 export interface Caller {

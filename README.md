@@ -96,7 +96,7 @@ tessdata/                Vendored Tesseract language model for receipt OCR (§7)
    `DATABASE_URL` at it.
 3. Install deps: `npm install`.
 4. Apply the schema: `npm run prisma:migrate` (creates the initial migration).
-5. (Optional) seed staples: `npx tsx prisma/seed.ts`.
+5. (Optional) seed staples: `npm run prisma:seed`.
 6. Run: `npm run dev` → http://localhost:3000.
 7. First run has no accounts, so the app sends you to `/setup` to create one.
    Invite the rest of the household from Settings afterwards.
@@ -488,3 +488,15 @@ Book details travel in recipe JSON exports; photos are excluded, as with existin
 recipe photos. Database backups retain the original pages.
 
 Apply database migrations (`npm run prisma:deploy`) before running this version.
+
+### Prisma 7
+
+The Prisma CLI reads `DATABASE_URL` from the environment or `.env` through
+`prisma.config.ts`. The application uses the PostgreSQL driver adapter.
+Use Node 22.12+ (the Docker image uses Node 22) or Node 24+.
+After installing dependencies with `npm ci`, run `npm run prisma:generate`
+before typechecking or tests. `npm run build` generates the client automatically.
+Generated files live in `src/generated/prisma` and are not committed.
+Run `npm run prisma:deploy` to apply migrations and `npm run prisma:seed`
+to explicitly run the optional seed. The Docker container applies migrations
+on startup using its runtime `DATABASE_URL`; building the image needs no database.

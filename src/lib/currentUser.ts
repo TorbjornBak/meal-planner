@@ -13,7 +13,7 @@ import {
   getSessionUser,
   type HouseholdSessionContext,
 } from "@/lib/auth";
-import type { User } from "@prisma/client";
+import type { User } from "@/generated/prisma/client";
 import { type AccessDecision, operationalAccess } from "@/lib/platformAdmin";
 
 /** The signed-in user, or null. */

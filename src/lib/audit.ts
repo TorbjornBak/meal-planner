@@ -13,7 +13,7 @@
  * console, where the same eyes that watch the backups will find it.
  */
 
-import type { AuditAction } from "@prisma/client";
+import type { AuditAction } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 
 export interface AuditEntry {

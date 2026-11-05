@@ -14,7 +14,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import type { AuthTokenPurpose, HouseholdRole, Prisma, User } from "@prisma/client";
+import type { AuthTokenPurpose, HouseholdRole, Prisma, User } from "@/generated/prisma/client";
 
 export const SESSION_COOKIE = "mp_session";
 

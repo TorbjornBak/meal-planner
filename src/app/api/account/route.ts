@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import type { PlatformRole } from "@prisma/client";
+import type { PlatformRole } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { currentHouseholdContext, currentUser } from "@/lib/currentUser";
 import { looksLikeEmail, normalizeEmail } from "@/lib/auth";
