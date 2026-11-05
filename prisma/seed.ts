@@ -1,7 +1,11 @@
-import { PrismaClient } from "@prisma/client";
+import "dotenv/config";
+import { databaseAdapter } from "../src/lib/databaseAdapter.ts";
+import { PrismaClient } from "../src/generated/prisma/client.ts";
 
 // Minimal seed: the initial household's settings and a couple of pantry staples.
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  adapter: databaseAdapter(),
+});
 const INITIAL_HOUSEHOLD_ID = "initial-household";
 
 async function main() {

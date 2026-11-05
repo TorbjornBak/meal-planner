@@ -12,7 +12,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Generate the Prisma client and build.
-RUN npx prisma generate && npm run build
+RUN npm run build
 
 # ---- runner ----
 FROM node:22-alpine AS runner
@@ -52,6 +52,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+# The configured seed imports the generated TypeScript client.
+COPY --from=builder /app/src/generated/prisma ./src/generated/prisma
+COPY --from=builder /app/src/lib/databaseAdapter.ts ./src/lib/databaseAdapter.ts
 # The vendored Tesseract language model for receipt OCR (§7). Shipped in the
 # image so the app never fetches it at runtime.
 COPY --from=builder /app/tessdata ./tessdata
@@ -60,4 +64,4 @@ USER nextjs
 EXPOSE 3000
 
 # Apply pending migrations, then start the server (next start binds 0.0.0.0).
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+CMD ["sh", "-c", "npm run prisma:deploy && npm run start"]

@@ -8,7 +8,7 @@
  * fetching them. Everything here is a total function of its inputs.
  */
 
-import type { HouseholdRole, InvitationKind } from "@prisma/client";
+import type { HouseholdRole, InvitationKind } from "@/generated/prisma/client";
 
 /**
  * Seven days, as the plan promises in the mail.

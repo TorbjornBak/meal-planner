@@ -9,7 +9,7 @@
  * that is known to have happened.
  */
 
-import type { BackupRun, BackupTrigger } from "@prisma/client";
+import type { BackupRun, BackupTrigger } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import {

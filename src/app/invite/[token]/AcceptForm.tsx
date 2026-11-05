@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { InvitationKind } from "@prisma/client";
+import type { InvitationKind } from "@/generated/prisma/client";
 import { invitationPath, type AcceptancePlan } from "@/lib/invitations";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/TurnstileWidget";
 import { TURNSTILE_ACTIONS } from "@/lib/turnstileActions";

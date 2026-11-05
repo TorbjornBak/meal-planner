@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { AuditAction } from "@prisma/client";
+import type { AuditAction } from "@/generated/prisma/client";
 import { DiagnosisPanel, type Diagnosis } from "../settings/Diagnosis";
 
 /**

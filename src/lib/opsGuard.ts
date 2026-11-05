@@ -8,7 +8,7 @@
  */
 
 import { NextResponse } from "next/server";
-import type { User } from "@prisma/client";
+import type { User } from "@/generated/prisma/client";
 import { operationalCaller } from "@/lib/currentUser";
 
 export type OperationalGuard =

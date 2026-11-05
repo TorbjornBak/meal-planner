@@ -9,7 +9,7 @@
  * transaction somebody will one day forget half of.
  */
 
-import { Prisma, type Invitation, type InvitationKind } from "@prisma/client";
+import { Prisma, type Invitation, type InvitationKind } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateToken, hashToken, normalizeEmail } from "@/lib/auth";
 import { householdInviteEmail, platformInviteEmail } from "@/lib/emails";
