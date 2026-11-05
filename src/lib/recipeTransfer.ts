@@ -65,6 +65,9 @@ export interface TransferRecipe {
    * "not said" — which is true — instead of quietly filing it as meat.
    */
   category: RecipeCategory | null;
+  bookTitle?: string | null;
+  bookAuthor?: string | null;
+  bookPage?: string | null;
   source: string | null;
   statedServings: number;
   instructions: string | null;
@@ -98,6 +101,9 @@ export interface RecipeRowForTransfer {
   name: string;
   kind: RecipeKind;
   category: RecipeCategory | null;
+  bookTitle?: string | null;
+  bookAuthor?: string | null;
+  bookPage?: string | null;
   source: string | null;
   statedServings: number;
   instructions: string | null;
@@ -137,6 +143,9 @@ export function toTransferRecipe(row: RecipeRowForTransfer): TransferRecipeWithL
     kind: row.kind ?? DEFAULT_RECIPE_KIND,
     category: row.category ?? null,
     source: row.source ?? null,
+    bookTitle: row.bookTitle ?? null,
+    bookAuthor: row.bookAuthor ?? null,
+    bookPage: row.bookPage ?? null,
     statedServings: row.statedServings,
     instructions: row.instructions ?? null,
     tags: [...(row.tags ?? [])],
@@ -208,6 +217,9 @@ const TransferRecipeSchema = z.object({
   // and not one to paper over with a default: silently reading "PESCATARIAN"
   // as "no answer" would lose the very claim the file was carrying.
   category: z.enum(RECIPE_CATEGORIES).nullable().default(null),
+  bookTitle: z.string().max(500).nullable().default(null),
+  bookAuthor: z.string().max(500).nullable().default(null),
+  bookPage: z.string().max(100).nullable().default(null),
   source: z.string().max(2000).nullable().default(null),
   statedServings: z.number().int().positive().max(1000),
   instructions: z.string().nullable().default(null),
@@ -346,6 +358,9 @@ export function toRecipeCreateData(recipe: TransferRecipeWithLines) {
     name: recipe.name.trim(),
     kind: recipe.kind,
     category: recipe.category,
+    bookTitle: recipe.bookTitle ?? null,
+    bookAuthor: recipe.bookAuthor ?? null,
+    bookPage: recipe.bookPage ?? null,
     source: recipe.source,
     instructions: recipe.instructions,
     statedServings: recipe.statedServings,
@@ -397,6 +412,9 @@ export function planImport(
 export interface ExistingRecipeForPhotoTarget {
   id: string;
   name: string;
+  bookTitle?: string | null;
+  bookAuthor?: string | null;
+  bookPage?: string | null;
   source: string | null;
   hasImage: boolean;
 }
@@ -404,6 +422,9 @@ export interface ExistingRecipeForPhotoTarget {
 /** A freshly created recipe and the source that came from the transfer file. */
 export interface CreatedRecipeForPhotoTarget {
   id: string;
+  bookTitle?: string | null;
+  bookAuthor?: string | null;
+  bookPage?: string | null;
   source: string | null;
 }
 

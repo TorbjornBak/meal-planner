@@ -20,6 +20,7 @@ export async function GET(
     where: { id, householdId: context.household.id },
     omit: OMIT_RECIPE_BLOBS,
     include: {
+      sourcePages: { orderBy: { position: "asc" }, select: { id: true, position: true, transcript: true } },
       ingredients: { orderBy: { position: "asc" } },
       // How many nights it is currently on, so the editor's delete step can
       // say what deleting costs: the slots go with it (cascade), and a recipe
@@ -35,6 +36,9 @@ export async function GET(
 }
 
 const PatchInput = z.object({
+  bookTitle: z.string().max(500).nullable().optional(),
+  bookAuthor: z.string().max(500).nullable().optional(),
+  bookPage: z.string().max(100).nullable().optional(),
   name: z.string().min(1).optional(),
   // Moving a recipe between the library's two sections (§2c) is an ordinary
   // edit — a coffee filed as dinner is a typo, not a reason to retype it.

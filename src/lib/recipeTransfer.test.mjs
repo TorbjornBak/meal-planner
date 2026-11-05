@@ -433,3 +433,14 @@ test("a category this version has never heard of is refused, not dropped", () =>
   assert.match(parsed.message, /Lasagne/);
   assert.match(parsed.message, /category/);
 });
+
+test("cookbook attribution survives export and import", () => {
+  const original = row({ bookTitle: "Simple", bookAuthor: "An Author", bookPage: "42–43" });
+  const file = buildTransferFile([original]);
+  const parsed = parseTransferFile(JSON.parse(JSON.stringify(file)));
+  assert.equal(parsed.ok, true);
+  const data = toRecipeCreateData(parsed.file.recipes[0]);
+  assert.equal(data.bookTitle, "Simple");
+  assert.equal(data.bookAuthor, "An Author");
+  assert.equal(data.bookPage, "42–43");
+});
